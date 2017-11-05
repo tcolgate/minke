@@ -1,0 +1,19 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: fe-ingress2
+  annotations:
+    minke.org/jwt-key: "keys-url"
+spec:
+  tls:
+  - hosts:
+    - test.example.com
+    secretName: test-secret
+  rules:
+  - host: test.example.com
+    http:
+      paths:
+      - path: /chocolate
+        backend:
+          serviceName: tea-svc
+          servicePort: 80

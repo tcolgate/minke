@@ -1,0 +1,20 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: fe-ingress2
+  namespace: other
+  annotations:
+    minke.org/jwt-key: "keys-url"
+spec:
+  tls:
+  - hosts:
+    - test.example.com
+    secretName: test-secret
+  rules:
+  - host: test.example.com
+    http:
+      paths:
+      - path: /toddy
+        backend:
+          serviceName: toddy-svc
+          servicePort: 80
