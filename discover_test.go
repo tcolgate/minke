@@ -40,7 +40,7 @@ func TestTest(t *testing.T) {
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 
-	inff := informers.NewSharedInformerFactory(client, 15*time.Second)
+	inff := informers.NewSharedInformerFactory(clientset, 15*time.Second)
 
 	ctrl := New(inff, nil)
 	ctrl.Run(ctx)

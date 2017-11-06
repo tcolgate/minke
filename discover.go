@@ -33,14 +33,19 @@ type Controller struct {
 	ings  map[string][]ingress // Hostnames to ingress mapping
 }
 
+type backend struct {
+	svc     string
+	svcPort intstr.IntOrString
+}
+
 type ingress struct {
-	rules []ingressRule
+	defaultBackend backend
+	rules          []ingressRule
 }
 
 type ingressRule struct {
-	re      *regexp.Regexp
-	svc     string
-	svcPort intstr.IntOrString
+	re *regexp.Regexp
+	backend
 }
 
 // New creates a new one
@@ -169,16 +174,23 @@ func (c *Controller) updateIngresses(key string) error {
 
 	for _, ing := range ings {
 		for _, ingr := range ing.Spec.Rules {
-			ning := ingress{}
+			ning := ingress{
+				defaultBackend: backend{
+					svc:     ing.Spec.Backend.ServiceName,
+					svcPort: ing.Spec.Backend.ServicePort,
+				},
+			}
 			for _, ingp := range ingr.HTTP.Paths {
 				re, err := regexp.CompilePOSIX(ingp.Path)
 				if err != nil {
 					continue
 				}
 				nir := ingressRule{
-					re:      re,
-					svc:     ingp.Backend.ServiceName,
-					svcPort: ingp.Backend.ServicePort,
+					re: re,
+					backend: backend{
+						svc:     ingp.Backend.ServiceName,
+						svcPort: ingp.Backend.ServicePort,
+					},
 				}
 				ning.rules = append(ning.rules, nir)
 			}
