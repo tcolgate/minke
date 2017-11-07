@@ -25,8 +25,9 @@ type Controller struct {
 	ingInf   cache.SharedIndexInformer
 	ingLst   listv1beta1.IngressLister
 
-	mutex sync.RWMutex
-	ings  map[string][]ingress // Hostnames to ingress mapping
+	mutex  sync.RWMutex
+	ings   map[string][]ingress // Hostnames to ingress mapping
+	epInfs map[string]cache.SharedIndexInformer
 }
 
 type backend struct {
@@ -40,7 +41,8 @@ type ingress struct {
 }
 
 type ingressRule struct {
-	re *regexp.Regexp
+	host string
+	re   *regexp.Regexp
 	backend
 }
 

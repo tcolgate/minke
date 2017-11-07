@@ -101,6 +101,7 @@ func (c *Controller) updateIngresses(key string) error {
 	}
 
 	newmap := make(map[string][]ingress)
+	newepmap := make(map[string]struct{})
 
 	for _, ing := range ings {
 		class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
@@ -122,18 +123,30 @@ func (c *Controller) updateIngresses(key string) error {
 				},
 			}
 			for _, ingp := range ingr.HTTP.Paths {
-				re, err := regexp.CompilePOSIX(ingp.Path)
+				path := "^/.+"
+				if ingp.Path != "" {
+					if ingp.Path[0] != '/' {
+						// TODO: log an error
+						continue
+					}
+					path = "^" + ingp.Path
+				}
+				re, err := regexp.CompilePOSIX(path)
 				if err != nil {
+					// TODO: log an error
 					continue
 				}
 				nir := ingressRule{
-					re: re,
+					host: ingr.Host,
+					re:   re,
 					backend: backend{
 						svc:     ingp.Backend.ServiceName,
 						svcPort: ingp.Backend.ServicePort,
 					},
 				}
 				ning.rules = append(ning.rules, nir)
+				svcKey := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
+				newepmap[svcKey] = struct{}{}
 			}
 			newmap[ingr.Host] = append(newmap[ingr.Host], ning)
 		}
@@ -142,8 +155,15 @@ func (c *Controller) updateIngresses(key string) error {
 	c.mutex.Lock()
 	// Stop listers from the old set
 	//oldings := c.ings
+	//oldepmap := c.epInfs
 	c.ings = newmap
+	// update the endpoint informers
+	//c.epInfs = newepmap
 	c.mutex.Unlock()
 
 	return nil
+}
+
+func (c *Controller) newEPInforner(svcKey string) (cache.SharedIndexInformer, error) {
+	return nil, nil
 }
