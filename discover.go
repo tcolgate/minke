@@ -23,6 +23,7 @@ import (
 type Controller struct {
 	clientset  kubernetes.Interface
 	namespaces []string
+	class      string
 	selector   labels.Selector
 
 	ingQueue workqueue.RateLimitingInterface
@@ -48,11 +49,46 @@ type ingressRule struct {
 	backend
 }
 
+// Option for setting controller properties
+type Option func(*Controller) error
+
+// WithClass is an option for setting the class
+func WithClass(cls string) Option {
+	return func(c *Controller) error {
+		c.class = cls
+		return nil
+	}
+}
+
+// WithNamespaces is an option for setting the set of namespaces to watch
+func WithNamespaces(ns []string) Option {
+	return func(c *Controller) error {
+		c.namespaces = ns
+		return nil
+	}
+}
+
+// WithSelector is an option for setting a selector to filter the set of
+// ingresses we will manage
+func WithSelector(s labels.Selector) Option {
+	return func(c *Controller) error {
+		c.selector = s
+		return nil
+	}
+}
+
 // New creates a new one
-func New(inff informers.SharedInformerFactory, selector labels.Selector) *Controller {
+func New(inff informers.SharedInformerFactory, opts ...Option) (*Controller, error) {
 	c := Controller{
-		mutex:    sync.RWMutex{},
-		selector: selector,
+		class:      "minke",
+		namespaces: []string{""},
+		mutex:      sync.RWMutex{},
+	}
+
+	for _, opt := range opts {
+		if err := opt(&c); err != nil {
+			return nil, err
+		}
 	}
 
 	c.ingQueue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
@@ -80,7 +116,7 @@ func New(inff informers.SharedInformerFactory, selector labels.Selector) *Contro
 		},
 	})
 
-	return &c
+	return &c, nil
 }
 
 // Run just  harness
@@ -173,6 +209,17 @@ func (c *Controller) updateIngresses(key string) error {
 	newmap := make(map[string][]ingress)
 
 	for _, ing := range ings {
+		class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
+		switch {
+		// If we have a class set, only match our own.
+		case c.class != "" && class != c.class:
+			continue
+		// If we have no class set, only ingresses with no class.
+		case c.class == "" && class != "":
+			continue
+		default:
+		}
+
 		for _, ingr := range ing.Spec.Rules {
 			ning := ingress{
 				defaultBackend: backend{
