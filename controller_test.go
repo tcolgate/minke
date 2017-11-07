@@ -42,6 +42,11 @@ func TestTest(t *testing.T) {
 
 	inff := informers.NewSharedInformerFactory(clientset, 15*time.Second)
 
-	ctrl := New(inff, nil)
+	ctrl, err := New(inff)
+	if err != nil {
+		t.Fatalf("error creating controller, err = %v", err)
+		return
+	}
+
 	ctrl.Run(ctx)
 }
