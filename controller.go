@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
 	listv1beta1 "k8s.io/client-go/listers/extensions/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -16,7 +15,7 @@ import (
 
 // Controller is the main thing
 type Controller struct {
-	clientset  kubernetes.Interface
+	inff       informers.SharedInformerFactory
 	namespaces []string
 	class      string
 	selector   labels.Selector
@@ -25,9 +24,9 @@ type Controller struct {
 	ingInf   cache.SharedIndexInformer
 	ingLst   listv1beta1.IngressLister
 
-	mutex  sync.RWMutex
-	ings   map[string][]ingress // Hostnames to ingress mapping
-	epInfs map[string]cache.SharedIndexInformer
+	mutex      sync.RWMutex
+	ings       map[string][]ingress // Hostnames to ingress mapping
+	epWatchers map[string]*epWatcher
 }
 
 type backend struct {
@@ -77,9 +76,11 @@ func WithSelector(s labels.Selector) Option {
 // New creates a new one
 func New(inff informers.SharedInformerFactory, opts ...Option) (*Controller, error) {
 	c := Controller{
+		inff:       inff,
 		class:      "minke",
 		namespaces: []string{""},
 		mutex:      sync.RWMutex{},
+		selector:   labels.Everything(),
 	}
 
 	for _, opt := range opts {

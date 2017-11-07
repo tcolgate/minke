@@ -54,7 +54,7 @@ func (c *Controller) Run(ctx context.Context) {
 				// work
 				defer c.ingQueue.Done(key)
 
-				err := c.processIngressItem(key.(string))
+				err := c.processIngressItem(ctx, key.(string))
 
 				if err == nil {
 					c.ingQueue.Forget(key)
@@ -73,7 +73,7 @@ func (c *Controller) Run(ctx context.Context) {
 	wg.Wait()
 }
 
-func (c *Controller) processIngressItem(key string) error {
+func (c *Controller) processIngressItem(ctx context.Context, key string) error {
 	log.Printf("Process ingress key %s", key)
 
 	_, exists, err := c.ingInf.GetIndexer().GetByKey(key)
@@ -83,14 +83,16 @@ func (c *Controller) processIngressItem(key string) error {
 
 	if !exists {
 		log.Printf("Process delete ingress key %s", key)
+		c.updateIngresses(ctx, key)
 		return nil
 	}
 
 	log.Printf("Process update ingress key %s", key)
+	c.updateIngresses(ctx, key)
 	return nil
 }
 
-func (c *Controller) updateIngresses(key string) error {
+func (c *Controller) updateIngresses(ctx context.Context, key string) error {
 	var ings []*extv1beta1.Ingress
 	for _, n := range c.namespaces {
 		nings, err := c.ingLst.Ingresses(n).List(c.selector)
@@ -101,7 +103,7 @@ func (c *Controller) updateIngresses(key string) error {
 	}
 
 	newmap := make(map[string][]ingress)
-	newepmap := make(map[string]struct{})
+	newepmap := make(map[string]*epWatcher)
 
 	for _, ing := range ings {
 		class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
@@ -116,11 +118,13 @@ func (c *Controller) updateIngresses(key string) error {
 		}
 
 		for _, ingr := range ing.Spec.Rules {
-			ning := ingress{
-				defaultBackend: backend{
+			log.Printf("ING: %#v", ingr)
+			ning := ingress{}
+			if ing.Spec.Backend != nil {
+				ning.defaultBackend = backend{
 					svc:     ing.Spec.Backend.ServiceName,
 					svcPort: ing.Spec.Backend.ServicePort,
-				},
+				}
 			}
 			for _, ingp := range ingr.HTTP.Paths {
 				path := "^/.+"
@@ -146,24 +150,37 @@ func (c *Controller) updateIngresses(key string) error {
 				}
 				ning.rules = append(ning.rules, nir)
 				svcKey := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
-				newepmap[svcKey] = struct{}{}
+				if _, ok := newepmap[svcKey]; !ok {
+					svcInf, err := c.newEPInforner(svcKey)
+					if err != nil {
+						// TODO: log error
+						continue
+					}
+					newepmap[svcKey] = svcInf
+				}
 			}
 			newmap[ingr.Host] = append(newmap[ingr.Host], ning)
 		}
 	}
 
+	for _, epw := range newepmap {
+		go epw.run(ctx)
+	}
+
 	c.mutex.Lock()
 	// Stop listers from the old set
 	//oldings := c.ings
-	//oldepmap := c.epInfs
+	oldepmap := c.epWatchers
 	c.ings = newmap
 	// update the endpoint informers
-	//c.epInfs = newepmap
+	c.epWatchers = newepmap
 	c.mutex.Unlock()
 
-	return nil
-}
+	// stop old endpoint watchers.
+	for _, oep := range oldepmap {
+		log.Printf("OEP: %#v", oep)
+		close(oep.stop)
+	}
 
-func (c *Controller) newEPInforner(svcKey string) (cache.SharedIndexInformer, error) {
-	return nil, nil
+	return nil
 }
