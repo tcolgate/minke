@@ -3,11 +3,16 @@ package minke
 import (
 	"regexp"
 	"sync"
+	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/watch"
 
-	"k8s.io/client-go/informers"
+	extv1beta1 "k8s.io/api/extensions/v1beta1"
+	"k8s.io/client-go/kubernetes"
 	listv1beta1 "k8s.io/client-go/listers/extensions/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -15,18 +20,21 @@ import (
 
 // Controller is the main thing
 type Controller struct {
-	inff       informers.SharedInformerFactory
+	client     kubernetes.Interface
 	namespaces []string
 	class      string
 	selector   labels.Selector
+	refresh    time.Duration
 
-	ingQueue workqueue.RateLimitingInterface
-	ingInf   cache.SharedIndexInformer
-	ingLst   listv1beta1.IngressLister
+	queue workqueue.RateLimitingInterface
+	inf   cache.SharedIndexInformer
+	lst   listv1beta1.IngressLister
 
-	mutex      sync.RWMutex
-	ings       map[string][]ingress // Hostnames to ingress mapping
-	epWatchers map[string]*epWatcher
+	mutex sync.RWMutex
+	ings  map[string][]ingress // Hostnames to ingress mapping
+
+	epWatchers     map[string]*epWatcher
+	secretWatchers map[string]*secretWatcher
 }
 
 type backend struct {
@@ -74,9 +82,9 @@ func WithSelector(s labels.Selector) Option {
 }
 
 // New creates a new one
-func New(inff informers.SharedInformerFactory, opts ...Option) (*Controller, error) {
+func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c := Controller{
-		inff:       inff,
+		client:     client,
 		class:      "minke",
 		namespaces: []string{""},
 		mutex:      sync.RWMutex{},
@@ -89,27 +97,41 @@ func New(inff informers.SharedInformerFactory, opts ...Option) (*Controller, err
 		}
 	}
 
-	c.ingQueue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-	c.ingInf = inff.Extensions().V1beta1().Ingresses().Informer()
-	c.ingLst = inff.Extensions().V1beta1().Ingresses().Lister()
+	c.queue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
-	c.ingInf.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	c.inf = cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				options.LabelSelector = c.selector.String()
+				return client.Extensions().Ingresses(metav1.NamespaceAll).List(options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				options.LabelSelector = c.selector.String()
+				return client.Extensions().Ingresses(metav1.NamespaceAll).Watch(options)
+			},
+		},
+		&extv1beta1.Ingress{},
+		c.refresh,
+		cache.Indexers{},
+	)
+
+	c.inf.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
-				c.ingQueue.Add(key)
+				c.queue.Add(key)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 			if err == nil {
-				c.ingQueue.Add(key)
+				c.queue.Add(key)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(new)
 			if err == nil {
-				c.ingQueue.Add(key)
+				c.queue.Add(key)
 			}
 		},
 	})

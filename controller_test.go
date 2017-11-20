@@ -6,9 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -40,9 +38,7 @@ func TestTest(t *testing.T) {
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 
-	inff := informers.NewSharedInformerFactory(clientset, 15*time.Second)
-
-	ctrl, err := New(inff)
+	ctrl, err := New(clientset)
 	if err != nil {
 		t.Fatalf("error creating controller, err = %v", err)
 		return

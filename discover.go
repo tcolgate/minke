@@ -24,9 +24,9 @@ func (c *Controller) Run(ctx context.Context) {
 		close(stop)
 	}()
 
-	go c.ingInf.Run(stop)
+	go c.inf.Run(stop)
 
-	if !cache.WaitForCacheSync(stop, c.ingInf.HasSynced) {
+	if !cache.WaitForCacheSync(stop, c.inf.HasSynced) {
 		log.Print("Timed out waiting for caches to sync")
 	}
 
@@ -45,25 +45,25 @@ func (c *Controller) Run(ctx context.Context) {
 			}
 
 			func() {
-				key, quit := c.ingQueue.Get()
+				key, quit := c.queue.Get()
 				if quit {
 					return
 				}
 
 				// you always have to indicate to the queue that you've completed a piece of
 				// work
-				defer c.ingQueue.Done(key)
+				defer c.queue.Done(key)
 
 				err := c.processIngressItem(ctx, key.(string))
 
 				if err == nil {
-					c.ingQueue.Forget(key)
-				} else if c.ingQueue.NumRequeues(key) < 4 {
+					c.queue.Forget(key)
+				} else if c.queue.NumRequeues(key) < 4 {
 					log.Printf("Error processing %s (will retry): %v", key, err)
-					c.ingQueue.AddRateLimited(key)
+					c.queue.AddRateLimited(key)
 				} else {
 					log.Printf("Error processing %s (giving up): %v", key, err)
-					c.ingQueue.Forget(key)
+					c.queue.Forget(key)
 					utilruntime.HandleError(err)
 				}
 			}()
@@ -76,7 +76,7 @@ func (c *Controller) Run(ctx context.Context) {
 func (c *Controller) processIngressItem(ctx context.Context, key string) error {
 	log.Printf("Process ingress key %s", key)
 
-	_, exists, err := c.ingInf.GetIndexer().GetByKey(key)
+	_, exists, err := c.inf.GetIndexer().GetByKey(key)
 	if err != nil {
 		return fmt.Errorf("Error fetching object with key %s from store: %v", key, err)
 	}
@@ -95,7 +95,7 @@ func (c *Controller) processIngressItem(ctx context.Context, key string) error {
 func (c *Controller) updateIngresses(ctx context.Context, key string) error {
 	var ings []*extv1beta1.Ingress
 	for _, n := range c.namespaces {
-		nings, err := c.ingLst.Ingresses(n).List(c.selector)
+		nings, err := c.lst.Ingresses(n).List(c.selector)
 		if err != nil {
 			continue
 		}
@@ -151,7 +151,7 @@ func (c *Controller) updateIngresses(ctx context.Context, key string) error {
 				ning.rules = append(ning.rules, nir)
 				svcKey := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
 				if _, ok := newepmap[svcKey]; !ok {
-					svcInf, err := c.newEPInforner(svcKey)
+					svcInf, err := c.newEPInforner(ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
 					if err != nil {
 						// TODO: log error
 						continue
