@@ -7,9 +7,11 @@ import (
 	"regexp"
 	"sync"
 
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"github.com/pkg/errors"
 
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -74,93 +76,76 @@ func (c *Controller) Run(ctx context.Context) {
 }
 
 func (c *Controller) processIngressItem(ctx context.Context, key string) error {
-	log.Printf("Process ingress key %s", key)
-
-	_, exists, err := c.inf.GetIndexer().GetByKey(key)
+	ingi, exists, err := c.inf.GetIndexer().GetByKey(key)
 	if err != nil {
-		return fmt.Errorf("Error fetching object with key %s from store: %v", key, err)
+		return errors.Wrap(err, "failed calling the API")
 	}
-
 	if !exists {
-		log.Printf("Process delete ingress key %s", key)
-		c.updateIngresses(ctx, key)
 		return nil
 	}
 
-	log.Printf("Process update ingress key %s", key)
-	c.updateIngresses(ctx, key)
-	return nil
-}
-
-func (c *Controller) updateIngresses(ctx context.Context, key string) error {
-	var ings []*extv1beta1.Ingress
-	for _, n := range c.namespaces {
-		nings, err := c.lst.Ingresses(n).List(c.selector)
-		if err != nil {
-			continue
-		}
-		ings = append(ings, nings...)
+	ing, ok := ingi.(*extv1beta1.Ingress)
+	if !ok {
+		return fmt.Errorf("interface was not an ingress %T", ingi)
 	}
 
 	newmap := make(map[string][]ingress)
 	newepmap := make(map[string]*epWatcher)
 
-	for _, ing := range ings {
-		class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
-		switch {
-		// If we have a class set, only match our own.
-		case c.class != "" && class != c.class:
-			continue
-		// If we have no class set, only ingresses with no class.
-		case c.class == "" && class != "":
-			continue
-		default:
-		}
+	class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
+	switch {
+	// If we have a class set, only match our own.
+	case c.class != "" && class != c.class:
+		return nil
+	// If we have no class set, only ingresses with no class.
+	case c.class == "" && class != "":
+		return nil
+	default:
+	}
 
-		for _, ingr := range ing.Spec.Rules {
-			log.Printf("ING: %#v", ingr)
-			ning := ingress{}
-			if ing.Spec.Backend != nil {
-				ning.defaultBackend = backend{
-					svc:     ing.Spec.Backend.ServiceName,
-					svcPort: ing.Spec.Backend.ServicePort,
-				}
+	for _, ingr := range ing.Spec.Rules {
+		log.Printf("ING: %#v", ingr)
+		ning := ingress{}
+		if ing.Spec.Backend != nil {
+			ning.defaultBackend = backend{
+				svc:     ing.Spec.Backend.ServiceName,
+				svcPort: ing.Spec.Backend.ServicePort,
 			}
-			for _, ingp := range ingr.HTTP.Paths {
-				path := "^/.+"
-				if ingp.Path != "" {
-					if ingp.Path[0] != '/' {
-						// TODO: log an error
-						continue
-					}
-					path = "^" + ingp.Path
-				}
-				re, err := regexp.CompilePOSIX(path)
-				if err != nil {
+		}
+		for _, ingp := range ingr.HTTP.Paths {
+			path := "^/.+"
+			if ingp.Path != "" {
+				if ingp.Path[0] != '/' {
 					// TODO: log an error
 					continue
 				}
-				nir := ingressRule{
-					host: ingr.Host,
-					re:   re,
-					backend: backend{
-						svc:     ingp.Backend.ServiceName,
-						svcPort: ingp.Backend.ServicePort,
-					},
-				}
-				ning.rules = append(ning.rules, nir)
-				svcKey := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
-				if _, ok := newepmap[svcKey]; !ok {
-					svcInf, err := c.newEPInforner(ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
-					if err != nil {
-						// TODO: log error
-						continue
-					}
-					newepmap[svcKey] = svcInf
-				}
+				path = "^" + ingp.Path
 			}
-			newmap[ingr.Host] = append(newmap[ingr.Host], ning)
+			re, err := regexp.CompilePOSIX(path)
+			if err != nil {
+				// TODO: log an error
+				continue
+			}
+			nir := ingressRule{
+				host: ingr.Host,
+				re:   re,
+				backend: backend{
+					svc:     ingp.Backend.ServiceName,
+					svcPort: ingp.Backend.ServicePort,
+				},
+			}
+			ning.rules = append(ning.rules, nir)
+			svcKey := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
+			if _, ok := newepmap[svcKey]; !ok {
+				svcInf, err := c.newEPInforner(ing.ObjectMeta.Namespace, ingp.Backend.ServiceName)
+				if err != nil {
+					// TODO: log error
+					continue
+				}
+				newepmap[svcKey] = svcInf
+			}
 		}
+		newmap[ingr.Host] = append(newmap[ingr.Host], ning)
 	}
 
 	for _, epw := range newepmap {
