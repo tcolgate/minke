@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -13,18 +14,24 @@ import (
 
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	unversionedcore "k8s.io/client-go/kubernetes/typed/core/v1"
+
 	listv1beta1 "k8s.io/client-go/listers/extensions/v1beta1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 )
 
 // Controller is the main thing
 type Controller struct {
-	client     kubernetes.Interface
-	namespaces []string
-	class      string
-	selector   labels.Selector
-	refresh    time.Duration
+	client        kubernetes.Interface
+	namespaces    []string
+	class         string
+	selector      labels.Selector
+	refresh       time.Duration
+	logFunc       func(string, ...interface{})
+	accessLogFunc func(string, ...interface{})
 
 	queue workqueue.RateLimitingInterface
 	inf   cache.SharedIndexInformer
@@ -35,6 +42,8 @@ type Controller struct {
 
 	epWatchers     map[string]*epWatcher
 	secretWatchers map[string]*secretWatcher
+
+	recorder record.EventRecorder
 }
 
 type backend struct {
@@ -81,6 +90,22 @@ func WithSelector(s labels.Selector) Option {
 	}
 }
 
+// WithLogFunc is an option for setting a log function
+func WithLogFunc(f func(string, ...interface{})) Option {
+	return func(c *Controller) error {
+		c.logFunc = f
+		return nil
+	}
+}
+
+// WithAccessLogFunc is an option for setting a log function
+func WithAccessLogFunc(f func(string, ...interface{})) Option {
+	return func(c *Controller) error {
+		c.accessLogFunc = f
+		return nil
+	}
+}
+
 // New creates a new one
 func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c := Controller{
@@ -96,6 +121,14 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 			return nil, err
 		}
 	}
+
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(c.logFunc)
+	eventBroadcaster.StartRecordingToSink(&unversionedcore.EventSinkImpl{
+		Interface: c.client.Core().Events(""),
+	})
+	c.recorder = eventBroadcaster.NewRecorder(scheme.Scheme,
+		apiv1.EventSource{Component: "loadbalancer-controller"})
 
 	c.queue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
