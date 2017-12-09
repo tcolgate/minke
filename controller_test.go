@@ -1,7 +1,6 @@
 package minke
 
 import (
-	"context"
 	"testing"
 
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
@@ -70,5 +69,6 @@ func TestTest(t *testing.T) {
 		return
 	}
 
-	ctrl.Run(context.Background())
+	stop := make(chan struct{})
+	ctrl.Run(stop)
 }

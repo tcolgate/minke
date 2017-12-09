@@ -6,21 +6,16 @@ import (
 	"time"
 
 	apiv1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/watch"
 
-	extv1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	unversionedcore "k8s.io/client-go/kubernetes/typed/core/v1"
 
-	listv1beta1 "k8s.io/client-go/listers/extensions/v1beta1"
-	"k8s.io/client-go/tools/cache"
+	listcorev1 "k8s.io/client-go/listers/core/v1"
+	listextv1beta1 "k8s.io/client-go/listers/extensions/v1beta1"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/workqueue"
 )
 
 // Controller is the main thing
@@ -33,9 +28,17 @@ type Controller struct {
 	logFunc       func(string, ...interface{})
 	accessLogFunc func(string, ...interface{})
 
-	queue workqueue.RateLimitingInterface
-	inf   cache.SharedIndexInformer
-	lst   listv1beta1.IngressLister
+	ingProc *processor
+	ingList listextv1beta1.IngressLister
+
+	secProc *processor
+	secList listcorev1.SecretLister
+
+	epsProc *processor
+	epsList listcorev1.EndpointsLister
+
+	svcProc *processor
+	svcList listcorev1.ServiceLister
 
 	mutex sync.RWMutex
 	ings  map[string][]ingress // Hostnames to ingress mapping
@@ -43,7 +46,11 @@ type Controller struct {
 	epWatchers     map[string]*epWatcher
 	secretWatchers map[string]*secretWatcher
 
-	recorder record.EventRecorder
+	recorder  record.EventRecorder
+	hasSynced func() bool
+
+	stopLock sync.Mutex
+	stopping bool
 }
 
 type backend struct {
@@ -130,44 +137,37 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.recorder = eventBroadcaster.NewRecorder(scheme.Scheme,
 		apiv1.EventSource{Component: "loadbalancer-controller"})
 
-	c.queue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-
-	c.inf = cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				options.LabelSelector = c.selector.String()
-				return client.Extensions().Ingresses(metav1.NamespaceAll).List(options)
-			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				options.LabelSelector = c.selector.String()
-				return client.Extensions().Ingresses(metav1.NamespaceAll).Watch(options)
-			},
-		},
-		&extv1beta1.Ingress{},
-		c.refresh,
-		cache.Indexers{},
-	)
-
-	c.inf.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(obj)
-			if err == nil {
-				c.queue.Add(key)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			if err == nil {
-				c.queue.Add(key)
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(new)
-			if err == nil {
-				c.queue.Add(key)
-			}
-		},
-	})
+	c.setupIngProcess()
+	c.setupSecretProcess()
+	c.setupEndpointsProcess()
+	c.setupServicesProcess()
 
 	return &c, nil
+}
+
+func (c *Controller) Run(stopCh <-chan struct{}) {
+	go c.ingProc.run(stopCh)
+	go c.svcProc.run(stopCh)
+	go c.secProc.run(stopCh)
+	go c.epsProc.run(stopCh)
+	<-stopCh
+}
+
+func (c *Controller) Stop() {
+	c.stopLock.Lock()
+	defer c.stopLock.Unlock()
+
+	if !c.stopping {
+		c.ingProc.queue.ShutDown()
+		c.secProc.queue.ShutDown()
+		c.svcProc.queue.ShutDown()
+		c.epsProc.queue.ShutDown()
+	}
+}
+
+func (c *Controller) HasSynced() bool {
+	return (c.ingProc.informer.HasSynced() &&
+		c.secProc.informer.HasSynced() &&
+		c.svcProc.informer.HasSynced() &&
+		c.epsProc.informer.HasSynced())
 }
