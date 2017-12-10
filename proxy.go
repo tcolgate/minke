@@ -1,15 +1,10 @@
 package minke
 
 import (
-	"crypto/tls"
 	"net/http"
 	"net/url"
 	"strings"
 )
-
-func (c *Controller) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return nil, nil
-}
 
 func (c *Controller) getTarget(req *http.Request) *url.URL {
 	return nil
