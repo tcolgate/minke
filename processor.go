@@ -1,7 +1,6 @@
 package minke
 
 import (
-	"fmt"
 	"log"
 	"time"
 
@@ -74,12 +73,11 @@ func (p *processor) run(stopChan <-chan struct{}) {
 	log.Printf("starting %T", p.objType)
 	go p.informer.Run(stopChan)
 
-	if !cache.WaitForCacheSync(stopChan, p.informer.HasSynced) {
-		utilruntime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
-		return
-	}
+	<-stopChan
+}
 
-	p.runWorker()
+func (p *processor) hasSynced() bool {
+	return p.informer.HasSynced()
 }
 
 func (p *processor) runWorker() {

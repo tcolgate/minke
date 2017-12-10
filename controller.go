@@ -15,6 +15,7 @@ import (
 
 	listcorev1 "k8s.io/client-go/listers/core/v1"
 	listextv1beta1 "k8s.io/client-go/listers/extensions/v1beta1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -42,9 +43,6 @@ type Controller struct {
 
 	mutex sync.RWMutex
 	ings  map[string][]ingress // Hostnames to ingress mapping
-
-	epWatchers     map[string]*epWatcher
-	secretWatchers map[string]*secretWatcher
 
 	recorder  record.EventRecorder
 	hasSynced func() bool
@@ -150,6 +148,19 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	go c.svcProc.run(stopCh)
 	go c.secProc.run(stopCh)
 	go c.epsProc.run(stopCh)
+
+	if !cache.WaitForCacheSync(
+		stopCh,
+		c.ingProc.hasSynced,
+		c.epsProc.hasSynced,
+		c.svcProc.hasSynced,
+		c.secProc.hasSynced) {
+	}
+
+	go c.ingProc.runWorker()
+	go c.epsProc.runWorker()
+	go c.svcProc.runWorker()
+	go c.secProc.runWorker()
 
 	<-stopCh
 }
