@@ -11,6 +11,7 @@ import (
 )
 
 type svcUpdater struct {
+	c *Controller
 }
 
 func (*svcUpdater) addItem(obj interface{}) error {
@@ -22,7 +23,7 @@ func (*svcUpdater) delItem(obj interface{}) error {
 }
 
 func (c *Controller) setupServicesProcess() error {
-	upd := &svcUpdater{}
+	upd := &svcUpdater{c}
 
 	c.svcProc = makeProcessor(
 		&cache.ListWatch{

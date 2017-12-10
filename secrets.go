@@ -11,6 +11,7 @@ import (
 )
 
 type secUpdater struct {
+	c *Controller
 }
 
 func (*secUpdater) addItem(obj interface{}) error {
@@ -22,7 +23,7 @@ func (*secUpdater) delItem(obj interface{}) error {
 }
 
 func (c *Controller) setupSecretProcess() error {
-	upd := &secUpdater{}
+	upd := &secUpdater{c}
 
 	c.secProc = makeProcessor(
 		&cache.ListWatch{

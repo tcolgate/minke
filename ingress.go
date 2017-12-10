@@ -79,7 +79,7 @@ func (*ingUpdater) delItem(obj interface{}) error {
 }
 
 func (c *Controller) setupIngProcess() error {
-	upd := &ingUpdater{}
+	upd := &ingUpdater{c}
 
 	c.ingProc = makeProcessor(
 		&cache.ListWatch{

@@ -150,6 +150,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	go c.svcProc.run(stopCh)
 	go c.secProc.run(stopCh)
 	go c.epsProc.run(stopCh)
+
 	<-stopCh
 }
 

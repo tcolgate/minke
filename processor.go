@@ -1,6 +1,8 @@
 package minke
 
 import (
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/pkg/errors"
@@ -69,15 +71,25 @@ func makeQueueEventHandlers(queue workqueue.RateLimitingInterface) cache.Resourc
 
 func (p *processor) run(stopChan <-chan struct{}) {
 	defer p.queue.ShutDown()
-	p.informer.Run(stopChan)
+	log.Printf("starting %T", p.objType)
+	go p.informer.Run(stopChan)
+
+	if !cache.WaitForCacheSync(stopChan, p.informer.HasSynced) {
+		utilruntime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
+		return
+	}
+
+	p.runWorker()
 }
 
 func (p *processor) runWorker() {
+	log.Printf("starting worker %T", p.objType)
 	for p.processNextItem() {
 	}
 }
 
 func (p *processor) processNextItem() bool {
+	log.Printf("processing %T", p.objType)
 	key, quit := p.queue.Get()
 	if quit {
 		return false
@@ -99,6 +111,7 @@ func (p *processor) processNextItem() bool {
 }
 
 func (p *processor) processItem(key string) error {
+	log.Printf("processing %T %v", p.objType, key)
 	obj, exists, err := p.informer.GetIndexer().GetByKey(key)
 	if err != nil {
 		return errors.Wrap(err, "failed calling the API")

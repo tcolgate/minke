@@ -11,6 +11,7 @@ import (
 )
 
 type epsUpdater struct {
+	c *Controller
 }
 
 func (*epsUpdater) addItem(obj interface{}) error {
@@ -22,7 +23,7 @@ func (*epsUpdater) delItem(obj interface{}) error {
 }
 
 func (c *Controller) setupEndpointsProcess() error {
-	upd := &epsUpdater{}
+	upd := &epsUpdater{c}
 
 	c.epsProc = makeProcessor(
 		&cache.ListWatch{
