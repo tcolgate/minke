@@ -74,6 +74,8 @@ func main() {
 		return
 	}
 
+	adminMux.Handle("/healthz", http.HandlerFunc(ctrl.ServeHealthzHTTP))
+
 	stop := make(chan struct{})
 	go ctrl.Run(stop)
 

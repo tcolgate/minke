@@ -1,6 +1,7 @@
 package minke
 
 import (
+	"net/http"
 	"regexp"
 	"sync"
 	"time"
@@ -182,4 +183,12 @@ func (c *Controller) HasSynced() bool {
 		c.secProc.informer.HasSynced() &&
 		c.svcProc.informer.HasSynced() &&
 		c.epsProc.informer.HasSynced())
+}
+
+func (c *Controller) ServeHealthzHTTP(w http.ResponseWriter, r *http.Request) {
+	if !c.HasSynced() {
+		http.Error(w, "Not synced yet", http.StatusInsufficientStorage)
+		return
+	}
+	http.Error(w, "OK", http.StatusOK)
 }
