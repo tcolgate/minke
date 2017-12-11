@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	opentracing "github.com/opentracing/opentracing-go"
+
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -55,21 +57,28 @@ type Controller struct {
 
 	transport *http.Transport
 	*httputil.ReverseProxy
+
+	metrics MetricsProvider
+	tracer  opentracing.Tracer
 }
 
 type backend struct {
-	svc     string
-	svcPort intstr.IntOrString
+	svc       string
+	namespace string
+	svcPort   intstr.IntOrString
 }
 
 type ingress struct {
+	name           string
+	namespace      string
 	defaultBackend backend
 	rules          []ingressRule
 }
 
 type ingressRule struct {
-	host string
-	re   *regexp.Regexp
+	host   string
+	re     *regexp.Regexp
+	prefix string
 	backend
 }
 
@@ -117,6 +126,23 @@ func WithAccessLogFunc(f func(string, ...interface{})) Option {
 	}
 }
 
+// WithTracer is an option for setting an opentracing Tracer
+func WithTracer(t opentracing.Tracer) Option {
+	return func(c *Controller) error {
+		c.tracer = t
+		return nil
+	}
+}
+
+// WithMetricsProvider is an option for setting a provider to
+// register and track metrics
+func WithMetricsProvider(m MetricsProvider) Option {
+	return func(c *Controller) error {
+		c.metrics = m
+		return nil
+	}
+}
+
 // New creates a new one
 func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c := Controller{
@@ -125,6 +151,8 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		namespaces: []string{""},
 		mutex:      sync.RWMutex{},
 		selector:   labels.Everything(),
+		metrics:    metricsProvider,
+		tracer:     opentracing.GlobalTracer(),
 	}
 
 	for _, opt := range opts {

@@ -55,8 +55,9 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 				continue
 			}
 			nir := ingressRule{
-				host: ingr.Host,
-				re:   re,
+				host:   ingr.Host,
+				prefix: ingp.String(),
+				re:     re,
 				backend: backend{
 					svc:     ingp.Backend.ServiceName,
 					svcPort: ingp.Backend.ServicePort,
