@@ -2,7 +2,6 @@ package minke
 
 import (
 	"fmt"
-	"log"
 	"regexp"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,9 +31,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		return nil
 	}
 
-	log.Printf("ING: %#v", ing)
 	for _, ingr := range ing.Spec.Rules {
-		log.Printf("ING: %#v", ingr)
 		ning := ingress{
 			name:      ing.ObjectMeta.Name,
 			namespace: ing.ObjectMeta.Namespace,
