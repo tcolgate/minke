@@ -1,14 +1,14 @@
 package minke
 
 import (
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
-
-	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func (c *Controller) getTarget(req *http.Request) *url.URL {
+	log.Println("IN GETTARGET HERE")
 	var ings []ingress
 	var ok bool
 	c.mutex.Lock()
@@ -21,24 +21,24 @@ func (c *Controller) getTarget(req *http.Request) *url.URL {
 		return nil
 	}
 
-	var ing ingress
-	var svcName string
-	var svcPort intstr.IntOrString
+	var urls []*url.URL
+FindURLS:
 	for i := range ings {
 		for j := range ings[i].rules {
 			if ings[i].rules[j].re.MatchString(req.URL.Path) {
-				ing = ings[i]
-				svcName = ings[i].rules[j].svc
-				svcPort = ings[i].rules[j].svcPort
+				ing := ings[i]
+				svcName := ings[i].rules[j].svc
+				svcPort := ings[i].rules[j].svcPort
+				key := ServiceKey{
+					namespace: ing.namespace,
+					name:      svcName,
+					portName:  svcPort.StrVal,
+				}
+				for k := range c.eps[key] {
+					urls = append(urls, c.eps[key][k])
+				}
+				break FindURLS
 			}
-		}
-	}
-
-	subsets := c.epsList.Endpoints(ing.namespace).Get().Subsets
-	for k := range subsets {
-		subsets[k].Addresses
-		for l := range subsets[k].Ports {
-			subsets[k].Ports[l
 		}
 	}
 
@@ -46,6 +46,7 @@ func (c *Controller) getTarget(req *http.Request) *url.URL {
 }
 
 func (c *Controller) director(req *http.Request) {
+	log.Println("IN DIRECTOR HERE")
 	target := c.getTarget(req)
 	targetQuery := target.RawQuery
 	req.URL.Scheme = target.Scheme

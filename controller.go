@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"regexp"
 	"sync"
 	"time"
@@ -23,6 +24,12 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 )
+
+type ServiceKey struct {
+	namespace string
+	name      string
+	portName  string
+}
 
 // Controller is the main thing
 type Controller struct {
@@ -46,9 +53,6 @@ type Controller struct {
 	svcProc *processor
 	svcList listcorev1.ServiceLister
 
-	mutex sync.RWMutex
-	ings  map[string][]ingress // Hostnames to ingress mapping
-
 	recorder  record.EventRecorder
 	hasSynced func() bool
 
@@ -60,6 +64,10 @@ type Controller struct {
 
 	metrics MetricsProvider
 	tracer  opentracing.Tracer
+
+	mutex sync.RWMutex
+	ings  map[string][]ingress      // Hostnames to ingress mapping
+	eps   map[ServiceKey][]*url.URL // Service to endpoints mapping
 }
 
 type backend struct {
@@ -153,6 +161,8 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		selector:   labels.Everything(),
 		metrics:    metricsProvider,
 		tracer:     opentracing.GlobalTracer(),
+
+		eps: make(map[ServiceKey][]*url.URL),
 	}
 
 	for _, opt := range opts {
