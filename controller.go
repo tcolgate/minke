@@ -59,8 +59,8 @@ type Controller struct {
 	stopLock sync.Mutex
 	stopping bool
 
-	transport *http.Transport
-	*httputil.ReverseProxy
+	transport http.RoundTripper
+	http.Handler
 
 	metrics MetricsProvider
 	tracer  opentracing.Tracer
@@ -177,7 +177,6 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.setupSecretProcess()
 	c.setupEndpointsProcess()
 	c.setupServicesProcess()
-
 	c.transport = &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
@@ -190,11 +189,16 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	c.ReverseProxy = &httputil.ReverseProxy{
+	c.Handler = &httputil.ReverseProxy{
 		Director:      c.director,
 		ErrorLog:      nil,
 		FlushInterval: 1 * time.Millisecond,
 		Transport:     c.transport,
+	}
+
+	if c.metrics != nil {
+		c.Handler = c.metrics.NewHTTPServerMetrics(c.Handler)
+		c.transport = c.metrics.NewHTTPTransportMetrics(c.transport)
 	}
 
 	return &c, nil

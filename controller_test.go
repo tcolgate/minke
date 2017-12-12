@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	corev1 "k8s.io/api/core/v1"
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -220,7 +222,8 @@ func BenchmarkMinke(b *testing.B) {
 		},
 	)
 
-	ctrl, err := New(clientset)
+	mp := NewPrometheusMetrics(prometheus.NewRegistry())
+	ctrl, err := New(clientset, WithMetricsProvider(mp))
 	if err != nil {
 		b.Fatalf("error creating controller, err = %v", err)
 		return

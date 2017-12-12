@@ -1,7 +1,10 @@
 package minke
 
 import (
+	"net/http"
+
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -43,6 +46,8 @@ type MetricsProvider interface {
 	NewLatencyMetric(name string) workqueue.SummaryMetric
 	NewWorkDurationMetric(name string) workqueue.SummaryMetric
 	NewRetriesMetric(name string) workqueue.CounterMetric
+	NewHTTPTransportMetrics(upstream http.RoundTripper) http.RoundTripper
+	NewHTTPServerMetrics(upstream http.Handler) http.Handler
 }
 
 type prometheusMetricsProvider struct {
@@ -225,4 +230,98 @@ func (p *prometheusMetricsProvider) NewLastResourceVersionMetric(name string) ca
 
 func (p *prometheusMetricsProvider) NewListWatchErrorMetric(name string) cache.GaugeMetric {
 	return p.listWatchError.WithLabelValues(name)
+}
+
+func (p *prometheusMetricsProvider) NewHTTPTransportMetrics(upstream http.RoundTripper) http.RoundTripper {
+	inFlightGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "http_client_inflight_requests",
+		Help: "A gauge of in-flight requests for the wrapped client.",
+	})
+
+	counter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_client_requests_total",
+			Help: "A counter for requests from the wrapped client.",
+		},
+		[]string{"code"},
+	)
+
+	tlsLatencyVec := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_client_tls_duration_seconds",
+			Help:    "Trace tls latency histogram.",
+			Buckets: []float64{.05, .1, .25, .5},
+		},
+		[]string{"event"},
+	)
+
+	histVec := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "request_duration_seconds",
+			Help:    "A histogram of request latencies.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{},
+	)
+
+	p.registry.MustRegister(counter, tlsLatencyVec, histVec, inFlightGauge)
+
+	trace := &promhttp.InstrumentTrace{
+		TLSHandshakeStart: func(t float64) {
+			tlsLatencyVec.WithLabelValues("tls_handshake_start")
+		},
+		TLSHandshakeDone: func(t float64) {
+			tlsLatencyVec.WithLabelValues("tls_handshake_done")
+		},
+	}
+
+	// Wrap the default RoundTripper with middleware.
+	roundTripper := promhttp.InstrumentRoundTripperInFlight(inFlightGauge,
+		promhttp.InstrumentRoundTripperCounter(counter,
+			promhttp.InstrumentRoundTripperTrace(trace,
+				promhttp.InstrumentRoundTripperDuration(histVec, upstream),
+			),
+		),
+	)
+
+	return roundTripper
+}
+
+func (p *prometheusMetricsProvider) NewHTTPServerMetrics(upstream http.Handler) http.Handler {
+	inFlightGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "http_server_inflight_requests",
+		Help: "A gauge of requests currently being served by the wrapped handler.",
+	})
+
+	counter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_server_requests_total",
+			Help: "A counter for requests to the wrapped handler.",
+		},
+		[]string{"code"},
+	)
+
+	histogramOpts := prometheus.HistogramOpts{
+		Name:    "http_server_request_duration_seconds",
+		Help:    "A histogram of latencies for requests.",
+		Buckets: []float64{.25, .5, 1, 2.5, 5, 10},
+	}
+
+	reqDurVec := prometheus.NewHistogramVec(
+		histogramOpts,
+		[]string{"code"},
+	)
+
+	// Register all of the metrics in the standard registry.
+	p.registry.MustRegister(inFlightGauge, counter, reqDurVec)
+
+	chain := promhttp.InstrumentHandlerInFlight(inFlightGauge,
+		promhttp.InstrumentHandlerCounter(counter,
+			promhttp.InstrumentHandlerDuration(reqDurVec,
+				upstream,
+			),
+		),
+	)
+
+	return chain
 }
