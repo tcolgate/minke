@@ -140,7 +140,7 @@ func (p *prometheusMetricsProvider) NewDepthMetric(name string) workqueue.GaugeM
 		Name:      "depth",
 		Help:      "Current depth of workqueue: " + name,
 	})
-	p.registry.Register(depth)
+	p.registry.MustRegister(depth)
 	return depth
 }
 
@@ -150,7 +150,7 @@ func (p *prometheusMetricsProvider) NewAddsMetric(name string) workqueue.Counter
 		Name:      "adds",
 		Help:      "Total number of adds handled by workqueue: " + name,
 	})
-	p.registry.Register(adds)
+	p.registry.MustRegister(adds)
 	return adds
 }
 
@@ -160,7 +160,7 @@ func (p *prometheusMetricsProvider) NewLatencyMetric(name string) workqueue.Summ
 		Name:      "queue_latency",
 		Help:      "How long an item stays in workqueue" + name + " before being requested.",
 	})
-	p.registry.Register(latency)
+	p.registry.MustRegister(latency)
 	return latency
 }
 
@@ -170,7 +170,7 @@ func (p *prometheusMetricsProvider) NewWorkDurationMetric(name string) workqueue
 		Name:      "work_duration",
 		Help:      "How long processing an item from workqueue" + name + " takes.",
 	})
-	p.registry.Register(workDuration)
+	p.registry.MustRegister(workDuration)
 	return workDuration
 }
 
@@ -180,7 +180,7 @@ func (p *prometheusMetricsProvider) NewRetriesMetric(name string) workqueue.Coun
 		Name:      "retries",
 		Help:      "Total number of retries handled by workqueue: " + name,
 	})
-	p.registry.Register(retries)
+	p.registry.MustRegister(retries)
 	return retries
 }
 

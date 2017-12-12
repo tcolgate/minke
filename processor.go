@@ -1,6 +1,8 @@
 package minke
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -25,7 +27,10 @@ type updater interface {
 }
 
 func makeProcessor(lw cache.ListerWatcher, obj runtime.Object, refresh time.Duration, updater updater) *processor {
-	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+	name := strings.Split(fmt.Sprintf("%T", obj), ".")
+	queue := workqueue.NewNamedRateLimitingQueue(
+		workqueue.DefaultControllerRateLimiter(),
+		strings.ToLower(name[1]))
 
 	inf := cache.NewSharedIndexInformer(
 		lw,

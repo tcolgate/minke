@@ -9,11 +9,10 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/sync/errgroup"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
-	extv1beta1 "k8s.io/api/extensions/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -42,31 +41,16 @@ func main() {
 
 	adminMux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 
-	clientset := fake.NewSimpleClientset(
-		&extv1beta1.Ingress{
-			TypeMeta: metav1.TypeMeta{
-				Kind: "Ingress",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "first",
-				Namespace: "default",
-			},
-			Spec: extv1beta1.IngressSpec{},
-		},
-	)
+	// creates the in-cluster config
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
 
-	clientset.ExtensionsV1beta1().Ingresses("default").Create(
-		&extv1beta1.Ingress{
-			TypeMeta: metav1.TypeMeta{
-				Kind: "Ingress",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "second",
-				Namespace: "default",
-			},
-			Spec: extv1beta1.IngressSpec{},
-		},
-	)
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
 
 	ctrl, err := minke.New(clientset)
 	if err != nil {
