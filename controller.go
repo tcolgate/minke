@@ -50,9 +50,6 @@ type Controller struct {
 	epsProc *processor
 	epsList listcorev1.EndpointsLister
 
-	svcProc *processor
-	svcList listcorev1.ServiceLister
-
 	recorder  record.EventRecorder
 	hasSynced func() bool
 
@@ -176,7 +173,6 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.setupIngProcess()
 	c.setupSecretProcess()
 	c.setupEndpointsProcess()
-	c.setupServicesProcess()
 	c.transport = &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
@@ -201,12 +197,15 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		c.transport = c.metrics.NewHTTPTransportMetrics(c.transport)
 	}
 
+	if c.tracer != nil {
+		c.Handler = addInboundTracing(c.tracer, c.Handler)
+	}
+
 	return &c, nil
 }
 
 func (c *Controller) Run(stopCh <-chan struct{}) {
 	go c.ingProc.run(stopCh)
-	go c.svcProc.run(stopCh)
 	go c.secProc.run(stopCh)
 	go c.epsProc.run(stopCh)
 
@@ -214,13 +213,11 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 		stopCh,
 		c.ingProc.hasSynced,
 		c.epsProc.hasSynced,
-		c.svcProc.hasSynced,
 		c.secProc.hasSynced) {
 	}
 
 	go c.ingProc.runWorker()
 	go c.epsProc.runWorker()
-	go c.svcProc.runWorker()
 	go c.secProc.runWorker()
 
 	<-stopCh
@@ -233,7 +230,6 @@ func (c *Controller) Stop() {
 	if !c.stopping {
 		c.ingProc.queue.ShutDown()
 		c.secProc.queue.ShutDown()
-		c.svcProc.queue.ShutDown()
 		c.epsProc.queue.ShutDown()
 	}
 }
@@ -241,7 +237,6 @@ func (c *Controller) Stop() {
 func (c *Controller) HasSynced() bool {
 	return (c.ingProc.informer.HasSynced() &&
 		c.secProc.informer.HasSynced() &&
-		c.svcProc.informer.HasSynced() &&
 		c.epsProc.informer.HasSynced())
 }
 
