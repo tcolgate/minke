@@ -13,7 +13,6 @@ import (
 
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -29,6 +28,7 @@ type ServiceKey struct {
 	namespace string
 	name      string
 	portName  string
+	portNo    int32
 }
 
 // Controller is the main thing
@@ -70,24 +70,18 @@ type Controller struct {
 	eps   map[ServiceKey][]*url.URL // Service to endpoints mapping
 }
 
-type backend struct {
-	svc       string
-	namespace string
-	svcPort   intstr.IntOrString
-}
-
 type ingress struct {
 	name           string
 	namespace      string
-	defaultBackend backend
+	defaultBackend ServiceKey
 	rules          []ingressRule
 }
 
 type ingressRule struct {
-	host   string
-	re     *regexp.Regexp
-	prefix string
-	backend
+	host    string
+	re      *regexp.Regexp
+	prefix  string
+	backend ServiceKey
 }
 
 // Option for setting controller properties

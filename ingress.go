@@ -7,6 +7,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/watch"
 
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
@@ -31,14 +32,15 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		return nil
 	}
 
+	log.Printf("ING: %#v", ing)
 	for _, ingr := range ing.Spec.Rules {
 		log.Printf("ING: %#v", ingr)
-		ning := ingress{}
+		ning := ingress{
+			name:      ing.ObjectMeta.Name,
+			namespace: ing.ObjectMeta.Namespace,
+		}
 		if ing.Spec.Backend != nil {
-			ning.defaultBackend = backend{
-				svc:     ing.Spec.Backend.ServiceName,
-				svcPort: ing.Spec.Backend.ServicePort,
-			}
+			ning.defaultBackend = backendToServiceKey(ing.ObjectMeta.Namespace, ing.Spec.Backend)
 		}
 		for _, ingp := range ingr.HTTP.Paths {
 			path := "^/.+"
@@ -55,13 +57,10 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 				continue
 			}
 			nir := ingressRule{
-				host:   ingr.Host,
-				prefix: ingp.String(),
-				re:     re,
-				backend: backend{
-					svc:     ingp.Backend.ServiceName,
-					svcPort: ingp.Backend.ServicePort,
-				},
+				host:    ingr.Host,
+				prefix:  ingp.String(),
+				re:      re,
+				backend: backendToServiceKey(ing.ObjectMeta.Namespace, &ingp.Backend),
 			}
 			ning.rules = append(ning.rules, nir)
 		}
@@ -115,4 +114,18 @@ func (c *Controller) ourClass(ing *extv1beta1.Ingress) bool {
 	default:
 		return true
 	}
+}
+
+func backendToServiceKey(namespace string, b *extv1beta1.IngressBackend) ServiceKey {
+	res := ServiceKey{
+		namespace: namespace,
+		name:      b.ServiceName,
+	}
+	switch b.ServicePort.Type {
+	case intstr.Int:
+		res.portNo = b.ServicePort.IntVal
+	case intstr.String:
+		res.portName = b.ServicePort.StrVal
+	}
+	return res
 }

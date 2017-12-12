@@ -2,7 +2,6 @@ package minke
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/url"
 	"strconv"
@@ -28,15 +27,21 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 
 	u.c.mutex.Lock()
 	defer u.c.mutex.Unlock()
+	u.clearEndpoints(eps.Namespace, eps.Name)
 
 	for i := range eps.Subsets {
 		set := eps.Subsets[i]
 		for j := range set.Ports {
 			port := set.Ports[j].Port
-			key := ServiceKey{
+			key1 := ServiceKey{
 				namespace: eps.Namespace,
 				name:      eps.Name,
 				portName:  set.Ports[j].Name,
+			}
+			key2 := ServiceKey{
+				namespace: eps.Namespace,
+				name:      eps.Name,
+				portNo:    set.Ports[j].Port,
 			}
 			var urls []*url.URL
 			scheme := "http"
@@ -52,20 +57,32 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 					),
 				})
 			}
-			u.c.eps[key] = urls
+			u.c.eps[key1] = urls
+			u.c.eps[key2] = urls
 		}
 	}
 
 	return nil
 }
 
-func (*epsUpdater) delItem(obj interface{}) error {
+func (u *epsUpdater) clearEndpoints(name, namespace string) {
+	for key := range u.c.eps {
+		if key.namespace == namespace &&
+			key.name == name {
+			delete(u.c.eps, key)
+		}
+	}
+}
+
+func (u *epsUpdater) delItem(obj interface{}) error {
 	eps, ok := obj.(*corev1.Endpoints)
 	if !ok {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
 
-	log.Printf("endpoints deleted, %#v", eps)
+	u.c.mutex.Lock()
+	defer u.c.mutex.Unlock()
+	u.clearEndpoints(eps.Namespace, eps.Name)
 
 	return nil
 }

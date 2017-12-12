@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -55,7 +56,6 @@ func TestTest(t *testing.T) {
 
 	u, _ := url.Parse(ts.URL)
 	cp, _ := strconv.Atoi(u.Port())
-
 	clientset := fake.NewSimpleClientset(
 		&extv1beta1.Ingress{
 			TypeMeta: metav1.TypeMeta{
@@ -64,6 +64,9 @@ func TestTest(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "first",
 				Namespace: "default",
+				Annotations: map[string]string{
+					"kubernetes.io/ingress.class": "minke",
+				},
 			},
 			Spec: extv1beta1.IngressSpec{
 				Rules: []extv1beta1.IngressRule{
@@ -75,6 +78,7 @@ func TestTest(t *testing.T) {
 									{
 										Backend: extv1beta1.IngressBackend{
 											ServiceName: "first",
+											ServicePort: intstr.Parse("mysvc"),
 										},
 									},
 								},
@@ -107,26 +111,13 @@ func TestTest(t *testing.T) {
 			Subsets: []corev1.EndpointSubset{
 				{
 					Addresses: []corev1.EndpointAddress{
-						{IP: u.Host},
+						{IP: u.Hostname()},
 					},
 					Ports: []corev1.EndpointPort{
 						{Name: "mysvc", Port: int32(cp)},
 					},
 				},
 			},
-		},
-	)
-
-	clientset.ExtensionsV1beta1().Ingresses("default").Create(
-		&extv1beta1.Ingress{
-			TypeMeta: metav1.TypeMeta{
-				Kind: "Ingress",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "second",
-				Namespace: "default",
-			},
-			Spec: extv1beta1.IngressSpec{},
 		},
 	)
 
@@ -142,7 +133,7 @@ func TestTest(t *testing.T) {
 	pts := httptest.NewServer(ctrl)
 	defer pts.Close()
 
-	req, _ := http.NewRequest("GET", pts.URL, nil)
+	req, _ := http.NewRequest("GET", pts.URL+"/hello", nil)
 	req.Host = "blah"
 	resp, err := pts.Client().Do(req)
 	t.Logf("resp: %#v, err: %v", resp, err)
