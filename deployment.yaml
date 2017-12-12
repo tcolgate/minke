@@ -1,0 +1,31 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: minke
+  labels:
+    app: minke
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: minke
+    spec:
+      containers:
+        - name: minke
+          image: "minke:v1"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          ports:
+            - name: https
+              containerPort: 443
+              protocol: TCP
+          ports:
+            - name: admin
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts: []
+      volumes: []
