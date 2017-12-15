@@ -10,7 +10,6 @@ import (
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/watch"
 
 	listcorev1 "k8s.io/client-go/listers/core/v1"
@@ -21,7 +20,6 @@ type serviceKey struct {
 	namespace string
 	name      string
 	portName  string
-	portNo    int32
 }
 
 type epsSet map[serviceKey][]*url.URL
@@ -30,12 +28,7 @@ func backendToServiceKey(namespace string, b *extv1beta1.IngressBackend) service
 	res := serviceKey{
 		namespace: namespace,
 		name:      b.ServiceName,
-	}
-	switch b.ServicePort.Type {
-	case intstr.Int:
-		res.portNo = b.ServicePort.IntVal
-	case intstr.String:
-		res.portName = b.ServicePort.StrVal
+		portName:  b.ServicePort.StrVal,
 	}
 	return res
 }
@@ -58,15 +51,10 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 		set := eps.Subsets[i]
 		for j := range set.Ports {
 			port := set.Ports[j].Port
-			key1 := serviceKey{
+			key := serviceKey{
 				namespace: eps.Namespace,
 				name:      eps.Name,
 				portName:  set.Ports[j].Name,
-			}
-			key2 := serviceKey{
-				namespace: eps.Namespace,
-				name:      eps.Name,
-				portNo:    set.Ports[j].Port,
 			}
 			var urls []*url.URL
 			scheme := "http"
@@ -82,8 +70,7 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 					),
 				})
 			}
-			u.c.eps[key1] = urls
-			u.c.eps[key2] = urls
+			u.c.eps[key] = urls
 		}
 	}
 
