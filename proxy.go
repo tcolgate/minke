@@ -12,10 +12,10 @@ import (
 
 func (c *Controller) getTarget(req *http.Request) *url.URL {
 	var ok bool
-	c.mutex.Lock()
+	c.mutex.RLock()
 	ings := c.ings
 	epss := c.eps
-	c.mutex.Unlock()
+	c.mutex.RUnlock()
 
 	key, ok := ings.getServiceKey(req)
 	if !ok {

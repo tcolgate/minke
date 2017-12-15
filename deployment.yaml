@@ -12,20 +12,25 @@ spec:
         app: minke
     spec:
       containers:
-        - name: minke
-          image: "minke:v3"
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
-          ports:
-            - name: https
-              containerPort: 443
-              protocol: TCP
-          ports:
-            - name: admin
-              containerPort: 8080
-              protocol: TCP
-          volumeMounts: []
+      - name: minke
+        image: "minke:v5"
+        imagePullPolicy: IfNotPresent
+        ports:
+          - name: http
+            containerPort: 80
+            protocol: TCP
+        ports:
+          - name: https
+            containerPort: 443
+            protocol: TCP
+        ports:
+          - name: admin
+            containerPort: 8080
+            protocol: TCP
+        volumeMounts: []
+      - name: jaeger-agent
+        image: jaegertracing/jaeger-agent
+        command:
+        - "/go/bin/agent-linux"
+        - "--collector.host-port=jaeger.default:14267"
       volumes: []
