@@ -10,16 +10,23 @@ import (
 	"time"
 
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tcolgate/minke"
 )
 
+func init() {
+}
+
 var (
+	masterURL  = flag.String("master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
+	kubeconfig = flag.String("kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
+
 	adminAddr = flag.String("addr.admin", ":8080", "address to provide metrics")
 	httpAddr  = flag.String("addr.http", ":80", "address to provide metrics")
 	httpsAddr = flag.String("addr.https", ":443", "address to provide metrics")
@@ -29,6 +36,14 @@ var (
 )
 
 func main() {
+	flag.Parse()
+
+	stop := setupSignalHandler()
+
+	cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfig)
+	if err != nil {
+		glog.Fatalf("Error building kubeconfig: %s", err.Error())
+	}
 
 	adminMux := http.NewServeMux()
 
@@ -41,13 +56,7 @@ func main() {
 
 	adminMux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 
-	// creates the in-cluster config
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
-	}
-
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -60,7 +69,6 @@ func main() {
 
 	adminMux.Handle("/healthz", http.HandlerFunc(ctrl.ServeHealthzHTTP))
 
-	stop := make(chan struct{})
 	go ctrl.Run(stop)
 
 	ctx, cancel := context.WithCancel(context.Background())
