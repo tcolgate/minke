@@ -13,7 +13,7 @@ spec:
     spec:
       containers:
         - name: minke
-          image: "minke:v1"
+          image: "minke:v3"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
