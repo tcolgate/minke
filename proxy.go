@@ -11,38 +11,25 @@ import (
 )
 
 func (c *Controller) getTarget(req *http.Request) *url.URL {
-	var ings []ingress
 	var ok bool
 	c.mutex.Lock()
-	if ings, ok = c.ings[req.Host]; !ok {
-		ings, ok = c.ings[""]
-	}
+	ings := c.ings
+	epss := c.eps
 	c.mutex.Unlock()
 
-	if ings == nil {
+	key, ok := ings.getServiceKey(req)
+	if !ok {
 		return nil
 	}
 
-	var urls []*url.URL
-FindURLS:
-	for i := range ings {
-		for j := range ings[i].rules {
-			if ings[i].rules[j].re.MatchString(req.URL.Path) {
-				key := ings[i].rules[j].backend
-				for k := range c.eps[key] {
-					urls = append(urls, c.eps[key][k])
-				}
-				break FindURLS
-			}
-		}
+	eps, _ := epss[key]
+
+	if len(eps) == 1 {
+		return eps[0]
 	}
 
-	if len(urls) == 1 {
-		return urls[0]
-	}
-
-	if len(urls) > 1 {
-		return urls[rand.Intn(len(urls)-1)]
+	if len(eps) > 1 {
+		return eps[rand.Intn(len(eps)-1)]
 	}
 
 	return nil

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"regexp"
 	"sync"
 	"time"
 
@@ -23,13 +22,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 )
-
-type ServiceKey struct {
-	namespace string
-	name      string
-	portName  string
-	portNo    int32
-}
 
 // Controller is the main thing
 type Controller struct {
@@ -63,22 +55,8 @@ type Controller struct {
 	tracer  opentracing.Tracer
 
 	mutex sync.RWMutex
-	ings  map[string][]ingress      // Hostnames to ingress mapping
-	eps   map[ServiceKey][]*url.URL // Service to endpoints mapping
-}
-
-type ingress struct {
-	name           string
-	namespace      string
-	defaultBackend ServiceKey
-	rules          []ingressRule
-}
-
-type ingressRule struct {
-	host    string
-	re      *regexp.Regexp
-	prefix  string
-	backend ServiceKey
+	ings  ingressSet // Hostnames to ingress mapping
+	eps   epsSet     // Service to endpoints mapping
 }
 
 // Option for setting controller properties
@@ -153,7 +131,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		metrics:    metricsProvider,
 		tracer:     opentracing.GlobalTracer(),
 
-		eps: make(map[ServiceKey][]*url.URL),
+		eps: make(map[serviceKey][]*url.URL),
 	}
 
 	for _, opt := range opts {
