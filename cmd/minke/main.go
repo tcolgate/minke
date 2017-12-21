@@ -15,9 +15,11 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/golang/glog"
+	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tcolgate/minke"
+	jconfig "github.com/uber/jaeger-client-go/config"
 )
 
 func init() {
@@ -48,6 +50,12 @@ func main() {
 	adminMux := http.NewServeMux()
 
 	registry := prometheus.NewRegistry()
+
+	tracer, closer, err := new(jconfig.Configuration).New(
+		"minke",
+	)
+	defer closer.Close()
+	opentracing.SetGlobalTracer(tracer)
 
 	registry.MustRegister(prometheus.NewProcessCollector(os.Getpid(), ""))
 	registry.MustRegister(prometheus.NewGoCollector())
