@@ -238,14 +238,6 @@ func (p *prometheusMetricsProvider) NewHTTPTransportMetrics(upstream http.RoundT
 		Help: "A gauge of in-flight requests for the wrapped client.",
 	})
 
-	counter := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "http_client_requests_total",
-			Help: "A counter for requests from the wrapped client.",
-		},
-		[]string{"code"},
-	)
-
 	tlsLatencyVec := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "http_client_tls_duration_seconds",
@@ -257,14 +249,14 @@ func (p *prometheusMetricsProvider) NewHTTPTransportMetrics(upstream http.RoundT
 
 	histVec := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "request_duration_seconds",
+			Name:    "http_client_request_duration_seconds",
 			Help:    "A histogram of request latencies.",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{},
+		[]string{"code"},
 	)
 
-	p.registry.MustRegister(counter, tlsLatencyVec, histVec, inFlightGauge)
+	p.registry.MustRegister(tlsLatencyVec, histVec, inFlightGauge)
 
 	trace := &promhttp.InstrumentTrace{
 		TLSHandshakeStart: func(t float64) {
@@ -277,10 +269,8 @@ func (p *prometheusMetricsProvider) NewHTTPTransportMetrics(upstream http.RoundT
 
 	// Wrap the default RoundTripper with middleware.
 	roundTripper := promhttp.InstrumentRoundTripperInFlight(inFlightGauge,
-		promhttp.InstrumentRoundTripperCounter(counter,
-			promhttp.InstrumentRoundTripperTrace(trace,
-				promhttp.InstrumentRoundTripperDuration(histVec, upstream),
-			),
+		promhttp.InstrumentRoundTripperTrace(trace,
+			promhttp.InstrumentRoundTripperDuration(histVec, upstream),
 		),
 	)
 
