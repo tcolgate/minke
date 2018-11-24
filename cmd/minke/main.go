@@ -6,6 +6,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/golang/glog"
+	"github.com/lucas-clemente/quic-go/h2quic"
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -30,8 +32,8 @@ var (
 	kubeconfig = flag.String("kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 
 	adminAddr = flag.String("addr.admin", ":8080", "address to provide metrics")
-	httpAddr  = flag.String("addr.http", ":80", "address to provide metrics")
-	httpsAddr = flag.String("addr.https", ":443", "address to provide metrics")
+	httpAddr  = flag.String("addr.http", ":80", "address to serve http")
+	httpsAddr = flag.String("addr.https", ":443", "address to server http/http2/quic")
 
 	defaultCert = flag.String("tls.default.cert", "cert.pem", "location of default cert")
 	defaultKey  = flag.String("tls.default.key", "key.pem", "location of default key")
@@ -76,6 +78,11 @@ func main() {
 	}
 
 	adminMux.Handle("/healthz", http.HandlerFunc(ctrl.ServeHealthzHTTP))
+	adminMux.HandleFunc("/debug/pprof/", pprof.Index)
+	adminMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	adminMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	adminMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	adminMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	go ctrl.Run(stop)
 
@@ -91,13 +98,14 @@ func main() {
 		return err
 	})
 
+	server := &http.Server{
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		Addr:         *httpAddr,
+		Handler:      ctrl,
+	}
+
 	g.Go(func() error {
-		server := &http.Server{
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
-			Addr:         *httpAddr,
-			Handler:      ctrl,
-		}
 		err := server.ListenAndServe()
 		if err != nil {
 			log.Printf("http listener error, %v", err)
@@ -152,7 +160,22 @@ func main() {
 		return err
 	})
 
+	quicserver := h2quic.Server{
+		Server: &http.Server{
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
+			Addr:         *httpsAddr,
+			Handler:      ctrl,
+		},
+	}
+
+	g.Go(func() error {
+		return quicserver.ListenAndServeTLS(*defaultCert, *defaultKey)
+	})
+
 	<-ctx.Done()
+	quicserver.CloseGracefully(5 * time.Second)
+	server.Shutdown(context.Background())
 	if err := ctx.Err(); err != nil {
 		os.Exit(1)
 	}

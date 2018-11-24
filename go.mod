@@ -5,6 +5,8 @@ require (
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578
 	github.com/apache/thrift v0.0.0-20151001171628-53dd39833a08
 	github.com/beorn7/perks v0.0.0-20160804104726-4c0e84591b9a
+	github.com/bifurcation/mint v0.0.0-20181105071958-a14404e9a861 // indirect
+	github.com/cheekybits/genny v1.0.0 // indirect
 	github.com/codahale/hdrhistogram v0.0.0-20161010025455-3a0bb77429bd
 	github.com/davecgh/go-spew v1.1.0
 	github.com/emicklei/go-restful v0.0.0-20170921190803-5741799b275a
@@ -26,6 +28,9 @@ require (
 	github.com/imdario/mergo v0.0.0-20171009183408-7fe0c75c13ab
 	github.com/json-iterator/go v0.0.0-20171115153421-f7279a603ede
 	github.com/juju/ratelimit v0.0.0-20171026090426-59fac5042749
+	github.com/lucas-clemente/aes12 v0.0.0-20171027163421-cd47fb39b79f // indirect
+	github.com/lucas-clemente/quic-go v0.10.0
+	github.com/lucas-clemente/quic-go-certificates v0.0.0-20160823095156-d2f86524cced // indirect
 	github.com/mailru/easyjson v0.0.0-20171120080333-32fa128f234d
 	github.com/matttproud/golang_protobuf_extensions v1.0.0
 	github.com/opentracing/opentracing-go v1.0.2
@@ -40,7 +45,7 @@ require (
 	github.com/uber/jaeger-client-go v0.0.0-20171127202303-ff3efa227b65
 	github.com/uber/jaeger-lib v1.2.1
 	golang.org/x/crypto v0.0.0-20171219041129-d585fd2cc919
-	golang.org/x/net v0.0.0-20171212005608-d866cfc389ce
+	golang.org/x/net v0.0.0-20181114220301-adae6a3d119a
 	golang.org/x/sync v0.0.0-20171101214715-fd80eb99c8f6
 	golang.org/x/sys v0.0.0-20171220172423-d818ba11af44
 	golang.org/x/text v0.0.0-20171218113626-eb22672bea55
