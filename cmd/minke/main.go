@@ -143,14 +143,14 @@ func main() {
 		GetCertificate: ctrl.GetCertificate,
 	}
 
+	tlsServer := &http.Server{
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		Addr:         *httpsAddr,
+		Handler:      ctrl,
+		TLSConfig:    tlsConfig,
+	}
 	g.Go(func() error {
-		tlsServer := &http.Server{
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
-			Addr:         *httpsAddr,
-			Handler:      ctrl,
-			TLSConfig:    tlsConfig,
-		}
 		tlsl, err := tls.Listen("tcp", *httpsAddr, tlsConfig)
 		if err != nil {
 			log.Fatal(err)
@@ -161,16 +161,11 @@ func main() {
 	})
 
 	quicserver := h2quic.Server{
-		Server: &http.Server{
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
-			Addr:         *httpsAddr,
-			Handler:      ctrl,
-		},
+		Server: tlsServer,
 	}
 
 	g.Go(func() error {
-		return quicserver.ListenAndServeTLS(*defaultCert, *defaultKey)
+		return quicserver.ListenAndServe()
 	})
 
 	<-ctx.Done()
