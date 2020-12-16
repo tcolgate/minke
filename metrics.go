@@ -43,8 +43,10 @@ type MetricsProvider interface {
 
 	NewDepthMetric(name string) workqueue.GaugeMetric
 	NewAddsMetric(name string) workqueue.CounterMetric
-	NewLatencyMetric(name string) workqueue.SummaryMetric
-	NewWorkDurationMetric(name string) workqueue.SummaryMetric
+	NewLatencyMetric(name string) workqueue.HistogramMetric
+	NewLongestRunningProcessorSecondsMetric(name string) workqueue.SettableGaugeMetric
+	NewUnfinishedWorkSecondsMetric(name string) workqueue.SettableGaugeMetric
+	NewWorkDurationMetric(name string) workqueue.HistogramMetric
 	NewRetriesMetric(name string) workqueue.CounterMetric
 	NewHTTPTransportMetrics(upstream http.RoundTripper) http.RoundTripper
 	NewHTTPServerMetrics(upstream http.Handler) http.Handler
@@ -111,6 +113,7 @@ func NewPrometheusMetrics(r *prometheus.Registry) *prometheusMetricsProvider {
 		Name:      "list_watch_error",
 		Help:      "Whether or not the reflector received an error on its last list or watch attempt",
 	}, []string{"name"})
+
 	p := &prometheusMetricsProvider{
 		registry:          r,
 		listsTotal:        listsTotal,
@@ -136,9 +139,10 @@ func NewPrometheusMetrics(r *prometheus.Registry) *prometheusMetricsProvider {
 
 func (p *prometheusMetricsProvider) NewDepthMetric(name string) workqueue.GaugeMetric {
 	depth := prometheus.NewGauge(prometheus.GaugeOpts{
-		Subsystem: name,
-		Name:      "depth",
-		Help:      "Current depth of workqueue: " + name,
+		Subsystem:   "workqueue",
+		Name:        "depth",
+		Help:        "Current depth of workqueue",
+		ConstLabels: prometheus.Labels{"name": name},
 	})
 	p.registry.MustRegister(depth)
 	return depth
@@ -146,29 +150,32 @@ func (p *prometheusMetricsProvider) NewDepthMetric(name string) workqueue.GaugeM
 
 func (p *prometheusMetricsProvider) NewAddsMetric(name string) workqueue.CounterMetric {
 	adds := prometheus.NewCounter(prometheus.CounterOpts{
-		Subsystem: name,
-		Name:      "adds",
-		Help:      "Total number of adds handled by workqueue: " + name,
+		Subsystem:   "workqueue",
+		Name:        "adds",
+		Help:        "Total number of adds handled by workqueue",
+		ConstLabels: prometheus.Labels{"name": name},
 	})
 	p.registry.MustRegister(adds)
 	return adds
 }
 
-func (p *prometheusMetricsProvider) NewLatencyMetric(name string) workqueue.SummaryMetric {
-	latency := prometheus.NewSummary(prometheus.SummaryOpts{
-		Subsystem: name,
-		Name:      "queue_latency",
-		Help:      "How long an item stays in workqueue" + name + " before being requested.",
+func (p *prometheusMetricsProvider) NewLatencyMetric(name string) workqueue.HistogramMetric {
+	latency := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Subsystem:   "workqueue",
+		Name:        "queue_latency",
+		Help:        "How long an item stays in workqueue before being requested.",
+		ConstLabels: prometheus.Labels{"name": name},
 	})
 	p.registry.MustRegister(latency)
 	return latency
 }
 
-func (p *prometheusMetricsProvider) NewWorkDurationMetric(name string) workqueue.SummaryMetric {
-	workDuration := prometheus.NewSummary(prometheus.SummaryOpts{
-		Subsystem: name,
-		Name:      "work_duration",
-		Help:      "How long processing an item from workqueue" + name + " takes.",
+func (p *prometheusMetricsProvider) NewWorkDurationMetric(name string) workqueue.HistogramMetric {
+	workDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Subsystem:   "workqueue",
+		Name:        "work_duration",
+		Help:        "How long processing an item from workqueue takes.",
+		ConstLabels: prometheus.Labels{"name": name},
 	})
 	p.registry.MustRegister(workDuration)
 	return workDuration
@@ -176,9 +183,10 @@ func (p *prometheusMetricsProvider) NewWorkDurationMetric(name string) workqueue
 
 func (p *prometheusMetricsProvider) NewRetriesMetric(name string) workqueue.CounterMetric {
 	retries := prometheus.NewCounter(prometheus.CounterOpts{
-		Subsystem: name,
-		Name:      "retries",
-		Help:      "Total number of retries handled by workqueue: " + name,
+		Subsystem:   "workqueue",
+		Name:        "retries",
+		Help:        "Total number of retries handled by workqueue",
+		ConstLabels: prometheus.Labels{"name": name},
 	})
 	p.registry.MustRegister(retries)
 	return retries
@@ -220,9 +228,36 @@ func (p *prometheusMetricsProvider) NewItemsInWatchMetric(name string) cache.Sum
 
 func (p *prometheusMetricsProvider) NewLastResourceVersionMetric(name string) cache.GaugeMetric {
 	rv := prometheus.NewGauge(prometheus.GaugeOpts{
-		Subsystem: name,
-		Name:      "last_resource_version",
-		Help:      "last resource version seen for the reflectors",
+		Subsystem:   reflectorSubsystem,
+		Name:        "last_resource_version",
+		Help:        "last resource version seen for the reflectors",
+		ConstLabels: prometheus.Labels{"name": name},
+	})
+	p.registry.MustRegister(rv)
+	return rv
+}
+
+func (p *prometheusMetricsProvider) NewLongestRunningProcessorSecondsMetric(name string) workqueue.SettableGaugeMetric {
+	rv := prometheus.NewGauge(prometheus.GaugeOpts{
+		Subsystem:   "workqueue",
+		Name:        "longest_running_processor",
+		Help:        "How many seconds has the longest running processor for workqueue been running.",
+		ConstLabels: prometheus.Labels{"name": name},
+	})
+
+	p.registry.MustRegister(rv)
+	return rv
+}
+
+func (p *prometheusMetricsProvider) NewUnfinishedWorkSecondsMetric(name string) workqueue.SettableGaugeMetric {
+	rv := prometheus.NewGauge(prometheus.GaugeOpts{
+		Subsystem: "workqueue",
+		Name:      "unfinished_work_seconds",
+		Help: "How many seconds of work has done that " +
+			"is in progress and hasn't been observed by work_duration. Large " +
+			"values indicate stuck threads. One can deduce the number of stuck " +
+			"threads by observing the rate at which this increases.",
+		ConstLabels: prometheus.Labels{"name": name},
 	})
 	p.registry.MustRegister(rv)
 	return rv

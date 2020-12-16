@@ -8,7 +8,8 @@ import (
 	"sync"
 	"time"
 
-	opentracing "github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel"
+	trace "go.opentelemetry.io/otel/trace"
 
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -52,7 +53,7 @@ type Controller struct {
 	http.Handler
 
 	metrics MetricsProvider
-	tracer  opentracing.Tracer
+	tracer  trace.Tracer
 
 	mutex sync.RWMutex
 	ings  ingressSet // Hostnames to ingress mapping
@@ -103,8 +104,8 @@ func WithAccessLogFunc(f func(string, ...interface{})) Option {
 	}
 }
 
-// WithTracer is an option for setting an opentracing Tracer
-func WithTracer(t opentracing.Tracer) Option {
+// WithTracer is an option for setting a Tracer
+func WithTracer(t trace.Tracer) Option {
 	return func(c *Controller) error {
 		c.tracer = t
 		return nil
@@ -129,7 +130,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		mutex:      sync.RWMutex{},
 		selector:   labels.Everything(),
 		metrics:    metricsProvider,
-		tracer:     opentracing.GlobalTracer(),
+		tracer:     otel.Tracer("minke"),
 
 		eps: make(map[serviceKey][]*url.URL),
 	}
@@ -143,7 +144,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(c.logFunc)
 	eventBroadcaster.StartRecordingToSink(&unversionedcore.EventSinkImpl{
-		Interface: c.client.Core().Events(""),
+		Interface: c.client.CoreV1().Events(""),
 	})
 	c.recorder = eventBroadcaster.NewRecorder(scheme.Scheme,
 		apiv1.EventSource{Component: "loadbalancer-controller"})
@@ -218,7 +219,11 @@ func (c *Controller) HasSynced() bool {
 		c.epsProc.informer.HasSynced())
 }
 
-func (c *Controller) ServeHealthzHTTP(w http.ResponseWriter, r *http.Request) {
+func (c *Controller) ServeLivezHTTP(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "OK", http.StatusOK)
+}
+
+func (c *Controller) ServeReadyzHTTP(w http.ResponseWriter, r *http.Request) {
 	if !c.HasSynced() {
 		http.Error(w, "Not synced yet", http.StatusInsufficientStorage)
 		return

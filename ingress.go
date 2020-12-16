@@ -1,6 +1,7 @@
 package minke
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -237,16 +238,17 @@ func (u *ingUpdater) delItem(obj interface{}) error {
 
 func (c *Controller) setupIngProcess() error {
 	upd := &ingUpdater{c}
+	ctx := context.Background()
 
 	c.ingProc = makeProcessor(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.Extensions().Ingresses(metav1.NamespaceAll).List(options)
+				return c.client.ExtensionsV1beta1().Ingresses(metav1.NamespaceAll).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.Extensions().Ingresses(metav1.NamespaceAll).Watch(options)
+				return c.client.ExtensionsV1beta1().Ingresses(metav1.NamespaceAll).Watch(ctx, options)
 			},
 		},
 		&extv1beta1.Ingress{},

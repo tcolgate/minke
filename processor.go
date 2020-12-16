@@ -5,8 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -29,7 +27,7 @@ type updater interface {
 func makeProcessor(lw cache.ListerWatcher, obj runtime.Object, refresh time.Duration, updater updater) *processor {
 	name := strings.Split(fmt.Sprintf("%T", obj), ".")
 	queue := workqueue.NewNamedRateLimitingQueue(
-		workqueue.DefaultControllerRateLimiter(),
+		workqueue.DefaultItemBasedRateLimiter(),
 		strings.ToLower(name[1]))
 
 	inf := cache.NewSharedIndexInformer(
@@ -112,7 +110,7 @@ func (p *processor) processNextItem() bool {
 func (p *processor) processItem(key string) error {
 	obj, exists, err := p.informer.GetIndexer().GetByKey(key)
 	if err != nil {
-		return errors.Wrap(err, "failed calling the API")
+		return fmt.Errorf("failed calling the API, %w", err)
 	}
 	if !exists {
 		return p.delItem(obj)

@@ -1,6 +1,7 @@
 package minke
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
@@ -101,14 +102,15 @@ func (u *epsUpdater) delItem(obj interface{}) error {
 
 func (c *Controller) setupEndpointsProcess() error {
 	upd := &epsUpdater{c}
+	ctx := context.Background()
 
 	c.epsProc = makeProcessor(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.client.CoreV1().Endpoints(metav1.NamespaceAll).List(options)
+				return c.client.CoreV1().Endpoints(metav1.NamespaceAll).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.client.CoreV1().Endpoints(metav1.NamespaceAll).Watch(options)
+				return c.client.CoreV1().Endpoints(metav1.NamespaceAll).Watch(ctx, options)
 			},
 		},
 		&corev1.Endpoints{},

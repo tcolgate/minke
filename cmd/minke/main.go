@@ -15,13 +15,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/golang/glog"
+	klog "k8s.io/klog/v2"
+
 	"github.com/lucas-clemente/quic-go/h2quic"
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tcolgate/minke"
-	jconfig "github.com/uber/jaeger-client-go/config"
 )
 
 func init() {
@@ -40,26 +39,21 @@ var (
 )
 
 func main() {
+	klog.InitFlags(nil)
 	flag.Parse()
 
 	stop := setupSignalHandler()
 
 	cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfig)
 	if err != nil {
-		glog.Fatalf("Error building kubeconfig: %s", err.Error())
+		klog.Fatalf("Error building kubeconfig: %s", err.Error())
 	}
 
 	adminMux := http.NewServeMux()
 
 	registry := prometheus.NewRegistry()
 
-	tracer, closer, err := new(jconfig.Configuration).New(
-		"minke",
-	)
-	defer closer.Close()
-	opentracing.SetGlobalTracer(tracer)
-
-	registry.MustRegister(prometheus.NewProcessCollector(os.Getpid(), ""))
+	registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	registry.MustRegister(prometheus.NewGoCollector())
 	metricsprovider := minke.NewPrometheusMetrics(registry)
 	minke.SetProvider(metricsprovider)
@@ -77,7 +71,8 @@ func main() {
 		return
 	}
 
-	adminMux.Handle("/healthz", http.HandlerFunc(ctrl.ServeHealthzHTTP))
+	adminMux.Handle("/livez", http.HandlerFunc(ctrl.ServeLivezHTTP))
+	adminMux.Handle("/readyz", http.HandlerFunc(ctrl.ServeReadyzHTTP))
 	adminMux.HandleFunc("/debug/pprof/", pprof.Index)
 	adminMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	adminMux.HandleFunc("/debug/pprof/profile", pprof.Profile)

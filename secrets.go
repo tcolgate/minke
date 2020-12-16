@@ -1,6 +1,8 @@
 package minke
 
 import (
+	"context"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,14 +26,15 @@ func (*secUpdater) delItem(obj interface{}) error {
 
 func (c *Controller) setupSecretProcess() error {
 	upd := &secUpdater{c}
+	ctx := context.Background()
 
 	c.secProc = makeProcessor(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.client.CoreV1().Secrets(metav1.NamespaceAll).List(options)
+				return c.client.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.client.CoreV1().Secrets(metav1.NamespaceAll).Watch(options)
+				return c.client.CoreV1().Secrets(metav1.NamespaceAll).Watch(ctx, options)
 			},
 		},
 		&corev1.Secret{},
