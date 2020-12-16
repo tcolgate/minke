@@ -6,11 +6,10 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/url"
-	"strings"
+	"strconv"
 )
 
-func (c *Controller) getTarget(req *http.Request) *url.URL {
+func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 	var ok bool
 	c.mutex.RLock()
 	ings := c.ings
@@ -19,49 +18,33 @@ func (c *Controller) getTarget(req *http.Request) *url.URL {
 
 	key, ok := ings.getServiceKey(req)
 	if !ok {
-		return nil
+		return serviceAddr{}, ""
 	}
+
+	port := c.svc.getServicePortScheme(key)
 
 	eps, _ := epss[key]
 
 	if len(eps) == 1 {
-		return eps[0]
+		return eps[0], port
 	}
 
 	if len(eps) > 1 {
-		return eps[rand.Intn(len(eps)-1)]
+		return eps[rand.Intn(len(eps)-1)], port
 	}
 
-	return nil
+	return serviceAddr{}, port
 }
 
 func (c *Controller) director(req *http.Request) {
-	target := c.getTarget(req)
-	targetQuery := target.RawQuery
-	req.URL.Scheme = target.Scheme
-	req.URL.Host = target.Host
-	req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
-	if targetQuery == "" || req.URL.RawQuery == "" {
-		req.URL.RawQuery = targetQuery + req.URL.RawQuery
-	} else {
-		req.URL.RawQuery = targetQuery + "&" + req.URL.RawQuery
-	}
+	target, scheme := c.getTarget(req)
+	req.URL.Host = net.JoinHostPort(target.addr, strconv.Itoa(target.port))
+	req.URL.Scheme = scheme
+
 	if _, ok := req.Header["User-Agent"]; !ok {
 		// explicitly disable User-Agent so it's not set to default value
 		req.Header.Set("User-Agent", "")
 	}
-}
-
-func singleJoiningSlash(a, b string) string {
-	aslash := strings.HasSuffix(a, "/")
-	bslash := strings.HasPrefix(b, "/")
-	switch {
-	case aslash && bslash:
-		return a + b[1:]
-	case !aslash && !bslash:
-		return a + "/" + b
-	}
-	return a + b
 }
 
 func websocketProxy(target string) http.Handler {

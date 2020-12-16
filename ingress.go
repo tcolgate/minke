@@ -126,6 +126,13 @@ type ingUpdater struct {
 
 func (c *Controller) ourClass(ing *extv1beta1.Ingress) bool {
 	class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
+
+	if ing.Spec.IngressClassName != nil {
+		// TODO: not really how we should use this, there
+		// should be an IngressClass object
+		class = *ing.Spec.IngressClassName
+	}
+
 	switch {
 	// If we have a class set, only match our own.
 	case c.class != "" && class != c.class:
@@ -236,9 +243,8 @@ func (u *ingUpdater) delItem(obj interface{}) error {
 	return nil
 }
 
-func (c *Controller) setupIngProcess() error {
+func (c *Controller) setupIngProcess(ctx context.Context) error {
 	upd := &ingUpdater{c}
-	ctx := context.Background()
 
 	c.ingProc = makeProcessor(
 		&cache.ListWatch{

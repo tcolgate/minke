@@ -97,9 +97,14 @@ func TestTest(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "first",
 				Namespace: "default",
+				Annotations: map[string]string{
+					"service.alpha.kubernetes.io/app-protocol": `{"mysvc":"HTTP"}`,
+				},
 			},
 			Spec: corev1.ServiceSpec{
-				Ports: []corev1.ServicePort{},
+				Ports: []corev1.ServicePort{
+					{Name: "mysvc"},
+				},
 			},
 		},
 		&corev1.Endpoints{

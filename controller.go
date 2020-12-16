@@ -1,10 +1,10 @@
 package minke
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"sync"
 	"time"
 
@@ -37,6 +37,9 @@ type Controller struct {
 	ingProc *processor
 	ingList listextv1beta1.IngressLister
 
+	svcProc *processor
+	svcList listcorev1.ServiceLister
+
 	secProc *processor
 	secList listcorev1.SecretLister
 
@@ -58,6 +61,7 @@ type Controller struct {
 	mutex sync.RWMutex
 	ings  ingressSet // Hostnames to ingress mapping
 	eps   epsSet     // Service to endpoints mapping
+	svc   *svcUpdater
 }
 
 // Option for setting controller properties
@@ -132,7 +136,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		metrics:    metricsProvider,
 		tracer:     otel.Tracer("minke"),
 
-		eps: make(map[serviceKey][]*url.URL),
+		eps: make(map[serviceKey][]serviceAddr),
 	}
 
 	for _, opt := range opts {
@@ -149,9 +153,12 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.recorder = eventBroadcaster.NewRecorder(scheme.Scheme,
 		apiv1.EventSource{Component: "loadbalancer-controller"})
 
-	c.setupIngProcess()
-	c.setupSecretProcess()
-	c.setupEndpointsProcess()
+	ctx := context.Background()
+	c.setupIngProcess(ctx)
+	c.setupServiceProcess(ctx)
+	c.setupSecretProcess(ctx)
+	c.setupEndpointsProcess(ctx)
+
 	c.transport = &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
@@ -186,16 +193,19 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 func (c *Controller) Run(stopCh <-chan struct{}) {
 	go c.ingProc.run(stopCh)
 	go c.secProc.run(stopCh)
+	go c.svcProc.run(stopCh)
 	go c.epsProc.run(stopCh)
 
 	if !cache.WaitForCacheSync(
 		stopCh,
 		c.ingProc.hasSynced,
+		c.svcProc.hasSynced,
 		c.epsProc.hasSynced,
 		c.secProc.hasSynced) {
 	}
 
 	go c.ingProc.runWorker()
+	go c.svcProc.runWorker()
 	go c.epsProc.runWorker()
 	go c.secProc.runWorker()
 
@@ -208,6 +218,7 @@ func (c *Controller) Stop() {
 
 	if !c.stopping {
 		c.ingProc.queue.ShutDown()
+		c.svcProc.queue.ShutDown()
 		c.secProc.queue.ShutDown()
 		c.epsProc.queue.ShutDown()
 	}
@@ -215,6 +226,7 @@ func (c *Controller) Stop() {
 
 func (c *Controller) HasSynced() bool {
 	return (c.ingProc.informer.HasSynced() &&
+		c.svcProc.informer.HasSynced() &&
 		c.secProc.informer.HasSynced() &&
 		c.epsProc.informer.HasSynced())
 }

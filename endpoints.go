@@ -3,9 +3,6 @@ package minke
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/url"
-	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
@@ -23,7 +20,12 @@ type serviceKey struct {
 	portName  string
 }
 
-type epsSet map[serviceKey][]*url.URL
+type serviceAddr struct {
+	addr string
+	port int
+}
+
+type epsSet map[serviceKey][]serviceAddr
 
 func backendToServiceKey(namespace string, b *extv1beta1.IngressBackend) serviceKey {
 	res := serviceKey{
@@ -57,21 +59,14 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 				name:      eps.Name,
 				portName:  set.Ports[j].Name,
 			}
-			var urls []*url.URL
-			scheme := "http"
-			if port == 443 {
-				scheme = "https"
-			}
+			var addrs []serviceAddr
 			for k := range set.Addresses {
-				urls = append(urls, &url.URL{
-					Scheme: scheme,
-					Host: net.JoinHostPort(
-						set.Addresses[k].IP,
-						strconv.Itoa(int(port)),
-					),
+				addrs = append(addrs, serviceAddr{
+					addr: set.Addresses[k].IP,
+					port: int(port),
 				})
 			}
-			u.c.eps[key] = urls
+			u.c.eps[key] = addrs
 		}
 	}
 
@@ -100,9 +95,8 @@ func (u *epsUpdater) delItem(obj interface{}) error {
 	return nil
 }
 
-func (c *Controller) setupEndpointsProcess() error {
+func (c *Controller) setupEndpointsProcess(ctx context.Context) error {
 	upd := &epsUpdater{c}
-	ctx := context.Background()
 
 	c.epsProc = makeProcessor(
 		&cache.ListWatch{

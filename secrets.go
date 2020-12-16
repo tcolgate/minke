@@ -2,31 +2,67 @@ package minke
 
 import (
 	"context"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/klog"
 
 	listcorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
+type secKey struct {
+	namespace, name string
+}
+
 type secUpdater struct {
-	c *Controller
+	c       *Controller
+	mu      sync.RWMutex
+	secrets map[secKey]map[string][]byte
 }
 
-func (*secUpdater) addItem(obj interface{}) error {
+func (u *secUpdater) addItem(obj interface{}) error {
+	sobj, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	klog.Infof("secret added, %s/%s", sobj.GetNamespace(), sobj.GetName())
+	u.secrets[secKey{sobj.Namespace, sobj.Name}] = sobj.Data
 	return nil
 }
 
-func (*secUpdater) delItem(obj interface{}) error {
+func (u *secUpdater) delItem(obj interface{}) error {
+	sobj, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	klog.Infof("secret deleted, %s/%s", sobj.GetNamespace(), sobj.GetName())
+	delete(u.secrets, secKey{sobj.Namespace, sobj.Name})
 	return nil
 }
 
-func (c *Controller) setupSecretProcess() error {
-	upd := &secUpdater{c}
-	ctx := context.Background()
+func (u *secUpdater) getSecret(namespace, name string) map[string][]byte {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	vs, _ := u.secrets[secKey{namespace, name}]
+	return vs
+}
+
+func (c *Controller) setupSecretProcess(ctx context.Context) error {
+	upd := &secUpdater{
+		c:       c,
+		secrets: make(map[secKey]map[string][]byte),
+	}
 
 	c.secProc = makeProcessor(
 		&cache.ListWatch{
