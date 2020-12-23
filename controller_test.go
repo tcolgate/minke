@@ -15,9 +15,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
-	extv1beta1 "k8s.io/api/extensions/v1beta1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -32,7 +31,7 @@ func TestTest(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	cp, _ := strconv.Atoi(u.Port())
 	clientset := fake.NewSimpleClientset(
-		&extv1beta1.Ingress{
+		&networkingv1.Ingress{
 			TypeMeta: metav1.TypeMeta{
 				Kind: "Ingress",
 			},
@@ -43,17 +42,21 @@ func TestTest(t *testing.T) {
 					"kubernetes.io/ingress.class": "minke",
 				},
 			},
-			Spec: extv1beta1.IngressSpec{
-				Rules: []extv1beta1.IngressRule{
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
 					{
 						Host: "blah",
-						IngressRuleValue: extv1beta1.IngressRuleValue{
-							HTTP: &extv1beta1.HTTPIngressRuleValue{
-								Paths: []extv1beta1.HTTPIngressPath{
+						IngressRuleValue: networkingv1.IngressRuleValue{
+							HTTP: &networkingv1.HTTPIngressRuleValue{
+								Paths: []networkingv1.HTTPIngressPath{
 									{
-										Backend: extv1beta1.IngressBackend{
-											ServiceName: "first",
-											ServicePort: intstr.Parse("mysvc"),
+										Backend: networkingv1.IngressBackend{
+											Service: &networkingv1.IngressServiceBackend{
+												Name: "first",
+												Port: networkingv1.ServiceBackendPort{
+													Name: "mysvc",
+												},
+											},
 										},
 									},
 								},
@@ -133,7 +136,7 @@ func BenchmarkMinke(b *testing.B) {
 	u, _ := url.Parse(ts.URL)
 	cp, _ := strconv.Atoi(u.Port())
 	clientset := fake.NewSimpleClientset(
-		&extv1beta1.Ingress{
+		&networkingv1.Ingress{
 			TypeMeta: metav1.TypeMeta{
 				Kind: "Ingress",
 			},
@@ -144,17 +147,21 @@ func BenchmarkMinke(b *testing.B) {
 					"kubernetes.io/ingress.class": "minke",
 				},
 			},
-			Spec: extv1beta1.IngressSpec{
-				Rules: []extv1beta1.IngressRule{
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
 					{
 						Host: "blah",
-						IngressRuleValue: extv1beta1.IngressRuleValue{
-							HTTP: &extv1beta1.HTTPIngressRuleValue{
-								Paths: []extv1beta1.HTTPIngressPath{
+						IngressRuleValue: networkingv1.IngressRuleValue{
+							HTTP: &networkingv1.HTTPIngressRuleValue{
+								Paths: []networkingv1.HTTPIngressPath{
 									{
-										Backend: extv1beta1.IngressBackend{
-											ServiceName: "first",
-											ServicePort: intstr.Parse("mysvc"),
+										Backend: networkingv1.IngressBackend{
+											Service: &networkingv1.IngressServiceBackend{
+												Name: "first",
+												Port: networkingv1.ServiceBackendPort{
+													Name: "mysvc",
+												},
+											},
 										},
 									},
 								},
@@ -303,7 +310,7 @@ func TestWebsocket(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	cp, _ := strconv.Atoi(u.Port())
 	clientset := fake.NewSimpleClientset(
-		&extv1beta1.Ingress{
+		&networkingv1.Ingress{
 			TypeMeta: metav1.TypeMeta{
 				Kind: "Ingress",
 			},
@@ -314,17 +321,21 @@ func TestWebsocket(t *testing.T) {
 					"kubernetes.io/ingress.class": "minke",
 				},
 			},
-			Spec: extv1beta1.IngressSpec{
-				Rules: []extv1beta1.IngressRule{
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
 					{
 						Host: "blah",
-						IngressRuleValue: extv1beta1.IngressRuleValue{
-							HTTP: &extv1beta1.HTTPIngressRuleValue{
-								Paths: []extv1beta1.HTTPIngressPath{
+						IngressRuleValue: networkingv1.IngressRuleValue{
+							HTTP: &networkingv1.HTTPIngressRuleValue{
+								Paths: []networkingv1.HTTPIngressPath{
 									{
-										Backend: extv1beta1.IngressBackend{
-											ServiceName: "first",
-											ServicePort: intstr.Parse("mysvc"),
+										Backend: networkingv1.IngressBackend{
+											Service: &networkingv1.IngressServiceBackend{
+												Name: "first",
+												Port: networkingv1.ServiceBackendPort{
+													Name: "mysvc",
+												},
+											},
 										},
 									},
 								},

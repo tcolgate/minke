@@ -12,8 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
-	extv1beta1 "k8s.io/api/extensions/v1beta1"
-	listextv1beta1 "k8s.io/client-go/listers/extensions/v1beta1"
+	networkingv1 "k8s.io/api/networking/v1"
+	listnetworkingv1 "k8s.io/client-go/listers/networking/v1"
 
 	"k8s.io/client-go/tools/cache"
 )
@@ -34,10 +34,11 @@ type ingress struct {
 }
 
 type ingressRule struct {
-	host    string
-	re      *regexp.Regexp
-	prefix  string
-	backend serviceKey
+	host     string
+	re       *regexp.Regexp
+	pathType string
+	prefix   string
+	backend  serviceKey
 }
 
 func (g ingressGroupByPriority) Len() int {
@@ -84,6 +85,14 @@ func (g ingressGroupByPriority) Less(i, j int) bool {
 	return false
 }
 
+func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
+	ms := ir.re.FindStringSubmatch(r.URL.Path)
+	if len(ms) == 0 {
+		return 0, false
+	}
+	return len(ms[0]), true
+}
+
 func (ings ingressHostGroup) getServiceKey(r *http.Request) (serviceKey, bool) {
 	var defBackend *serviceKey
 
@@ -91,10 +100,18 @@ func (ings ingressHostGroup) getServiceKey(r *http.Request) (serviceKey, bool) {
 		if defBackend != nil {
 			defBackend = ings[i].defaultBackend
 		}
-		for j := range ings[i].rules {
-			if ings[i].rules[j].re.MatchString(r.URL.Path) {
-				return ings[i].rules[j].backend, true
+
+		var matched serviceKey
+		var matchLen int
+		for _, rule := range ings[i].rules {
+			if l, ok := rule.matchRule(r); ok && l > matchLen {
+				matched = rule.backend
+				matchLen = l
 			}
+		}
+
+		if matched.name != "" {
+			return matched, true
 		}
 	}
 	if defBackend != nil {
@@ -126,7 +143,7 @@ type ingUpdater struct {
 	c *Controller
 }
 
-func (c *Controller) ourClass(ing *extv1beta1.Ingress) bool {
+func (c *Controller) ourClass(ing *networkingv1.Ingress) bool {
 	class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
 
 	if ing.Spec.IngressClassName != nil {
@@ -148,7 +165,7 @@ func (c *Controller) ourClass(ing *extv1beta1.Ingress) bool {
 }
 
 func (u *ingUpdater) addItem(obj interface{}) error {
-	ing, ok := obj.(*extv1beta1.Ingress)
+	ing, ok := obj.(*networkingv1.Ingress)
 	if !ok {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
@@ -163,8 +180,8 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 			name:      ing.ObjectMeta.Name,
 			namespace: ing.ObjectMeta.Namespace,
 		}
-		if ing.Spec.Backend != nil {
-			key := backendToServiceKey(ing.ObjectMeta.Namespace, ing.Spec.Backend)
+		if ing.Spec.DefaultBackend != nil {
+			key := backendToServiceKey(ing.ObjectMeta.Namespace, ing.Spec.DefaultBackend)
 			ning.defaultBackend = &key
 		}
 		for _, ingp := range ingr.HTTP.Paths {
@@ -182,10 +199,11 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 				continue
 			}
 			nir := ingressRule{
-				host:    ingr.Host,
-				prefix:  ingp.String(),
-				re:      re,
-				backend: backendToServiceKey(ing.ObjectMeta.Namespace, &ingp.Backend),
+				host:     ingr.Host,
+				prefix:   ingp.String(),
+				re:       re,
+				backend:  backendToServiceKey(ing.ObjectMeta.Namespace, &ingp.Backend),
+				pathType: ingr.HTTP.Paths[0].String(),
 			}
 			ning.rules = append(ning.rules, nir)
 		}
@@ -222,7 +240,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 }
 
 func (u *ingUpdater) delItem(obj interface{}) error {
-	ing, ok := obj.(*extv1beta1.Ingress)
+	ing, ok := obj.(*networkingv1.Ingress)
 	if !ok {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
@@ -252,19 +270,19 @@ func (c *Controller) setupIngProcess(ctx context.Context) error {
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.ExtensionsV1beta1().Ingresses(metav1.NamespaceAll).List(ctx, options)
+				return c.client.NetworkingV1().Ingresses(metav1.NamespaceAll).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.ExtensionsV1beta1().Ingresses(metav1.NamespaceAll).Watch(ctx, options)
+				return c.client.NetworkingV1().Ingresses(metav1.NamespaceAll).Watch(ctx, options)
 			},
 		},
-		&extv1beta1.Ingress{},
+		&networkingv1.Ingress{},
 		c.refresh,
 		upd,
 	)
 
-	c.ingList = listextv1beta1.NewIngressLister(c.ingProc.informer.GetIndexer())
+	c.ingList = listnetworkingv1.NewIngressLister(c.ingProc.informer.GetIndexer())
 
 	return nil
 }

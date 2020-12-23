@@ -41,8 +41,15 @@ func (u *svcUpdater) addItem(obj interface{}) error {
 	defer u.mu.Unlock()
 
 	var appProtos map[string]string
+
 	appsJSON := sobj.Annotations[annAppProtos]
 	json.Unmarshal([]byte(appsJSON), &appProtos)
+
+	for _, p := range sobj.Spec.Ports {
+		if p.AppProtocol != nil {
+			appProtos[p.Name] = *p.AppProtocol
+		}
+	}
 
 	u.svcs[svcKey{sobj.Namespace, sobj.Name}] = svcItem{
 		svc:       sobj,
