@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/http2"
+
 	"go.opentelemetry.io/otel"
 	trace "go.opentelemetry.io/otel/trace"
 
@@ -159,7 +161,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.setupSecretProcess(ctx)
 	c.setupEndpointsProcess(ctx)
 
-	c.transport = &http.Transport{
+	transport1 := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -171,11 +173,20 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
+	transport2 := &http2.Transport{
+		AllowHTTP: true,
+	}
+
+	transport := &httpTransport{
+		base:  transport1,
+		http2: transport2,
+	}
+
 	c.Handler = &httputil.ReverseProxy{
 		Director:      c.director,
 		ErrorLog:      nil,
 		FlushInterval: 1 * time.Millisecond,
-		Transport:     c.transport,
+		Transport:     transport,
 	}
 
 	if c.metrics != nil {

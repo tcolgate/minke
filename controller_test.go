@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/net/http2"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1beta1 "k8s.io/api/networking/v1beta1"
@@ -272,7 +273,6 @@ func BenchmarkNoProxy(b *testing.B) {
 		resp.Body.Close()
 	}
 }
-
 func TestWebsocket(t *testing.T) {
 	var upgrader = websocket.Upgrader{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -416,4 +416,114 @@ func TestWebsocket(t *testing.T) {
 	}
 	c.Close()
 
+}
+
+func TestHTTP2Backend(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "OK")
+	}))
+	defer ts.Close()
+
+	http2.ConfigureServer(ts.Config, &http2.Server{})
+	strhttp2 := "HTTP2"
+
+	u, _ := url.Parse(ts.URL)
+	cp, _ := strconv.Atoi(u.Port())
+	clientset := fake.NewSimpleClientset(
+		&networkingv1beta1.Ingress{
+			TypeMeta: metav1.TypeMeta{
+				Kind: "Ingress",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "first",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"kubernetes.io/ingress.class": "minke",
+				},
+			},
+			Spec: networkingv1beta1.IngressSpec{
+				Rules: []networkingv1beta1.IngressRule{
+					{
+						Host: "blah",
+						IngressRuleValue: networkingv1beta1.IngressRuleValue{
+							HTTP: &networkingv1beta1.HTTPIngressRuleValue{
+								Paths: []networkingv1beta1.HTTPIngressPath{
+									{
+										Backend: networkingv1beta1.IngressBackend{
+											ServiceName: "first",
+											ServicePort: intstr.FromString("mysvc"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		&corev1.Service{
+			TypeMeta: metav1.TypeMeta{
+				Kind: "Service",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "first",
+				Namespace: "default",
+			},
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{
+					{Name: "mysvc", AppProtocol: &strhttp2},
+				},
+			},
+		},
+		&corev1.Endpoints{
+			TypeMeta: metav1.TypeMeta{
+				Kind: "Endpoints",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+				Name:      "first",
+			},
+			Subsets: []corev1.EndpointSubset{
+				{
+					Addresses: []corev1.EndpointAddress{
+						{IP: u.Hostname()},
+						{IP: u.Hostname()},
+						{IP: u.Hostname()},
+						{IP: u.Hostname()},
+					},
+					Ports: []corev1.EndpointPort{
+						{Name: "mysvc", Port: int32(cp)},
+					},
+				},
+			},
+		},
+	)
+
+	ctrl, err := New(clientset)
+	if err != nil {
+		t.Fatalf("error creating controller, err = %v", err)
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ctrl.Run(ctx.Done())
+	time.Sleep(1 * time.Second)
+
+	pts := httptest.NewServer(ctrl)
+	defer pts.Close()
+
+	h := http.Header{}
+	h.Set("Host", "blah")
+	ctrlu, _ := url.Parse(pts.URL)
+	ctrlu.Scheme = "http"
+	ctrlu.Path = "/"
+	t.Logf("http2 http url: %v", ctrlu.String())
+
+	req, _ := http.NewRequest("GET", pts.URL+"/hello", nil)
+	req.Host = "blah"
+	resp, err := pts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("got error %v", err)
+	}
+	resp.Body.Close()
 }

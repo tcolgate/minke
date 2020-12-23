@@ -16,8 +16,7 @@ Principles:
     e.g. http vs https handling, blocking, http redirect, we will not provide
     magic to do it for you.
   - Rely on http.ReverseProxy with two exceptions.
-    - Support websocket hijack.
-    - Support h2c http2.
+    - Support h2c http2 backends.
 - Maximize observability.
   - Out of the box OpenTracing support (at least jaeger, probably zipkin).
   - Out of the box prometheus metrics.

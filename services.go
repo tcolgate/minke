@@ -45,6 +45,9 @@ func (u *svcUpdater) addItem(obj interface{}) error {
 	appsJSON := sobj.Annotations[annAppProtos]
 	json.Unmarshal([]byte(appsJSON), &appProtos)
 
+	if appProtos == nil {
+		appProtos = make(map[string]string)
+	}
 	for _, p := range sobj.Spec.Ports {
 		if p.AppProtocol != nil {
 			appProtos[p.Name] = *p.AppProtocol
