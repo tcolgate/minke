@@ -40,8 +40,6 @@ func (u *svcUpdater) addItem(obj interface{}) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	klog.Infof("service added, %s/%s", sobj.GetNamespace(), sobj.GetName())
-
 	var appProtos map[string]string
 	appsJSON := sobj.Annotations[annAppProtos]
 	json.Unmarshal([]byte(appsJSON), &appProtos)

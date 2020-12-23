@@ -2,6 +2,7 @@ package minke
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -29,6 +30,7 @@ type ingress struct {
 	priority       *int
 	defaultBackend *serviceKey
 	rules          []ingressRule
+	cert           *tls.Certificate
 }
 
 type ingressRule struct {
@@ -166,7 +168,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 			ning.defaultBackend = &key
 		}
 		for _, ingp := range ingr.HTTP.Paths {
-			path := "^/.+"
+			path := "^/.*"
 			if ingp.Path != "" {
 				if ingp.Path[0] != '/' {
 					// TODO: log an error

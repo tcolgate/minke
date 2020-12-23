@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
@@ -21,34 +22,6 @@ import (
 )
 
 func TestTest(t *testing.T) {
-	/*
-		// creates the in-cluster config
-		config, err := rest.InClusterConfig()
-		if err != nil {
-			panic(err.Error())
-		}
-	*/
-
-	/*
-		sigs := make(chan os.Signal, 1)
-		ctx, cancel := context.WithCancel(context.Background())
-
-		go func() {
-			s := <-sigs
-			fmt.Println("Got signal:", s)
-			cancel()
-		}()
-
-		// use the current context in kubeconfig
-		kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-		config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			panic(err.Error())
-		}
-		// creates the clientset
-		clientset, err := kubernetes.NewForConfig(config)
-	*/
-
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs, _ := httputil.DumpRequest(r, true)
 		t.Logf("request: %s", string(rs))
@@ -298,4 +271,149 @@ func BenchmarkNoProxy(b *testing.B) {
 		}
 		resp.Body.Close()
 	}
+}
+
+func TestWebsocket(t *testing.T) {
+	var upgrader = websocket.Upgrader{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rs, _ := httputil.DumpRequest(r, true)
+		t.Logf("ws request: %s", string(rs))
+
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatal("ws server upgrade:", err)
+			return
+		}
+		defer c.Close()
+		for {
+			mt, message, err := c.ReadMessage()
+			if err != nil {
+				t.Log("ws server read:", err)
+				break
+			}
+			t.Logf("recv: %s", message)
+			err = c.WriteMessage(mt, message)
+			if err != nil {
+				t.Fatal("ws server write:", err)
+			}
+		}
+	}))
+	defer ts.Close()
+
+	u, _ := url.Parse(ts.URL)
+	cp, _ := strconv.Atoi(u.Port())
+	clientset := fake.NewSimpleClientset(
+		&extv1beta1.Ingress{
+			TypeMeta: metav1.TypeMeta{
+				Kind: "Ingress",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "first",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"kubernetes.io/ingress.class": "minke",
+				},
+			},
+			Spec: extv1beta1.IngressSpec{
+				Rules: []extv1beta1.IngressRule{
+					{
+						Host: "blah",
+						IngressRuleValue: extv1beta1.IngressRuleValue{
+							HTTP: &extv1beta1.HTTPIngressRuleValue{
+								Paths: []extv1beta1.HTTPIngressPath{
+									{
+										Backend: extv1beta1.IngressBackend{
+											ServiceName: "first",
+											ServicePort: intstr.Parse("mysvc"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		&corev1.Service{
+			TypeMeta: metav1.TypeMeta{
+				Kind: "Service",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "first",
+				Namespace: "default",
+			},
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{
+					{Name: "mysvc"},
+				},
+			},
+		},
+		&corev1.Endpoints{
+			TypeMeta: metav1.TypeMeta{
+				Kind: "Endpoints",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+				Name:      "first",
+			},
+			Subsets: []corev1.EndpointSubset{
+				{
+					Addresses: []corev1.EndpointAddress{
+						{IP: u.Hostname()},
+						{IP: u.Hostname()},
+						{IP: u.Hostname()},
+						{IP: u.Hostname()},
+					},
+					Ports: []corev1.EndpointPort{
+						{Name: "mysvc", Port: int32(cp)},
+					},
+				},
+			},
+		},
+	)
+
+	ctrl, err := New(clientset)
+	if err != nil {
+		t.Fatalf("error creating controller, err = %v", err)
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ctrl.Run(ctx.Done())
+	time.Sleep(1 * time.Second)
+
+	pts := httptest.NewServer(ctrl)
+	defer pts.Close()
+
+	h := http.Header{}
+	h.Set("Host", "blah")
+	ctrlu, _ := url.Parse(pts.URL)
+	ctrlu.Scheme = "ws"
+	ctrlu.Path = "/"
+	t.Logf("ws url: %v", ctrlu.String())
+
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, ctrlu.String(), h)
+	if err != nil {
+		t.Fatal("ws client dial:", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		msg := fmt.Sprintf("message %v", i)
+		err = c.WriteMessage(websocket.TextMessage, []byte(msg))
+		if err != nil {
+			t.Fatalf("ws client write, %v", err)
+			return
+		}
+
+		_, message, err := c.ReadMessage()
+		if err != nil {
+			t.Fatalf("ws client read failed, %v", err)
+			return
+		}
+		if string(message) != msg {
+			t.Fatalf("read expected %q, got %q", msg, message)
+		}
+	}
+	c.Close()
+
 }
