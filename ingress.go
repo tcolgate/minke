@@ -12,8 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
-	networkingv1 "k8s.io/api/networking/v1"
-	listnetworkingv1 "k8s.io/client-go/listers/networking/v1"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
+	listnetworkingv1beta1 "k8s.io/client-go/listers/networking/v1beta1"
 
 	"k8s.io/client-go/tools/cache"
 )
@@ -143,7 +143,7 @@ type ingUpdater struct {
 	c *Controller
 }
 
-func (c *Controller) ourClass(ing *networkingv1.Ingress) bool {
+func (c *Controller) ourClass(ing *networkingv1beta1.Ingress) bool {
 	class, _ := ing.ObjectMeta.Annotations["kubernetes.io/ingress.class"]
 
 	if ing.Spec.IngressClassName != nil {
@@ -165,7 +165,7 @@ func (c *Controller) ourClass(ing *networkingv1.Ingress) bool {
 }
 
 func (u *ingUpdater) addItem(obj interface{}) error {
-	ing, ok := obj.(*networkingv1.Ingress)
+	ing, ok := obj.(*networkingv1beta1.Ingress)
 	if !ok {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
@@ -180,8 +180,8 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 			name:      ing.ObjectMeta.Name,
 			namespace: ing.ObjectMeta.Namespace,
 		}
-		if ing.Spec.DefaultBackend != nil {
-			key := backendToServiceKey(ing.ObjectMeta.Namespace, ing.Spec.DefaultBackend)
+		if ing.Spec.Backend != nil {
+			key := backendToServiceKey(ing.ObjectMeta.Namespace, ing.Spec.Backend)
 			ning.defaultBackend = &key
 		}
 		for _, ingp := range ingr.HTTP.Paths {
@@ -240,7 +240,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 }
 
 func (u *ingUpdater) delItem(obj interface{}) error {
-	ing, ok := obj.(*networkingv1.Ingress)
+	ing, ok := obj.(*networkingv1beta1.Ingress)
 	if !ok {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
@@ -270,19 +270,19 @@ func (c *Controller) setupIngProcess(ctx context.Context) error {
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.NetworkingV1().Ingresses(metav1.NamespaceAll).List(ctx, options)
+				return c.client.NetworkingV1beta1().Ingresses(metav1.NamespaceAll).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.NetworkingV1().Ingresses(metav1.NamespaceAll).Watch(ctx, options)
+				return c.client.NetworkingV1beta1().Ingresses(metav1.NamespaceAll).Watch(ctx, options)
 			},
 		},
-		&networkingv1.Ingress{},
+		&networkingv1beta1.Ingress{},
 		c.refresh,
 		upd,
 	)
 
-	c.ingList = listnetworkingv1.NewIngressLister(c.ingProc.informer.GetIndexer())
+	c.ingList = listnetworkingv1beta1.NewIngressLister(c.ingProc.informer.GetIndexer())
 
 	return nil
 }

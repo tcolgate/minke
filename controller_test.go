@@ -15,8 +15,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -31,7 +32,7 @@ func TestTest(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	cp, _ := strconv.Atoi(u.Port())
 	clientset := fake.NewSimpleClientset(
-		&networkingv1.Ingress{
+		&networkingv1beta1.Ingress{
 			TypeMeta: metav1.TypeMeta{
 				Kind: "Ingress",
 			},
@@ -42,21 +43,17 @@ func TestTest(t *testing.T) {
 					"kubernetes.io/ingress.class": "minke",
 				},
 			},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
+			Spec: networkingv1beta1.IngressSpec{
+				Rules: []networkingv1beta1.IngressRule{
 					{
 						Host: "blah",
-						IngressRuleValue: networkingv1.IngressRuleValue{
-							HTTP: &networkingv1.HTTPIngressRuleValue{
-								Paths: []networkingv1.HTTPIngressPath{
+						IngressRuleValue: networkingv1beta1.IngressRuleValue{
+							HTTP: &networkingv1beta1.HTTPIngressRuleValue{
+								Paths: []networkingv1beta1.HTTPIngressPath{
 									{
-										Backend: networkingv1.IngressBackend{
-											Service: &networkingv1.IngressServiceBackend{
-												Name: "first",
-												Port: networkingv1.ServiceBackendPort{
-													Name: "mysvc",
-												},
-											},
+										Backend: networkingv1beta1.IngressBackend{
+											ServiceName: "first",
+											ServicePort: intstr.FromString("mysvc"),
 										},
 									},
 								},
@@ -136,7 +133,7 @@ func BenchmarkMinke(b *testing.B) {
 	u, _ := url.Parse(ts.URL)
 	cp, _ := strconv.Atoi(u.Port())
 	clientset := fake.NewSimpleClientset(
-		&networkingv1.Ingress{
+		&networkingv1beta1.Ingress{
 			TypeMeta: metav1.TypeMeta{
 				Kind: "Ingress",
 			},
@@ -147,21 +144,17 @@ func BenchmarkMinke(b *testing.B) {
 					"kubernetes.io/ingress.class": "minke",
 				},
 			},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
+			Spec: networkingv1beta1.IngressSpec{
+				Rules: []networkingv1beta1.IngressRule{
 					{
 						Host: "blah",
-						IngressRuleValue: networkingv1.IngressRuleValue{
-							HTTP: &networkingv1.HTTPIngressRuleValue{
-								Paths: []networkingv1.HTTPIngressPath{
+						IngressRuleValue: networkingv1beta1.IngressRuleValue{
+							HTTP: &networkingv1beta1.HTTPIngressRuleValue{
+								Paths: []networkingv1beta1.HTTPIngressPath{
 									{
-										Backend: networkingv1.IngressBackend{
-											Service: &networkingv1.IngressServiceBackend{
-												Name: "first",
-												Port: networkingv1.ServiceBackendPort{
-													Name: "mysvc",
-												},
-											},
+										Backend: networkingv1beta1.IngressBackend{
+											ServiceName: "first",
+											ServicePort: intstr.FromString("mysvc"),
 										},
 									},
 								},
@@ -310,7 +303,7 @@ func TestWebsocket(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	cp, _ := strconv.Atoi(u.Port())
 	clientset := fake.NewSimpleClientset(
-		&networkingv1.Ingress{
+		&networkingv1beta1.Ingress{
 			TypeMeta: metav1.TypeMeta{
 				Kind: "Ingress",
 			},
@@ -321,21 +314,17 @@ func TestWebsocket(t *testing.T) {
 					"kubernetes.io/ingress.class": "minke",
 				},
 			},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
+			Spec: networkingv1beta1.IngressSpec{
+				Rules: []networkingv1beta1.IngressRule{
 					{
 						Host: "blah",
-						IngressRuleValue: networkingv1.IngressRuleValue{
-							HTTP: &networkingv1.HTTPIngressRuleValue{
-								Paths: []networkingv1.HTTPIngressPath{
+						IngressRuleValue: networkingv1beta1.IngressRuleValue{
+							HTTP: &networkingv1beta1.HTTPIngressRuleValue{
+								Paths: []networkingv1beta1.HTTPIngressPath{
 									{
-										Backend: networkingv1.IngressBackend{
-											Service: &networkingv1.IngressServiceBackend{
-												Name: "first",
-												Port: networkingv1.ServiceBackendPort{
-													Name: "mysvc",
-												},
-											},
+										Backend: networkingv1beta1.IngressBackend{
+											ServiceName: "first",
+											ServicePort: intstr.FromString("mysvc"),
 										},
 									},
 								},

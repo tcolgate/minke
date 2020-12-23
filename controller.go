@@ -19,7 +19,7 @@ import (
 	unversionedcore "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	listcorev1 "k8s.io/client-go/listers/core/v1"
-	listnetworkingv1 "k8s.io/client-go/listers/networking/v1"
+	listnetworkingv1beta1 "k8s.io/client-go/listers/networking/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 )
@@ -35,7 +35,7 @@ type Controller struct {
 	accessLogFunc func(string, ...interface{})
 
 	ingProc *processor
-	ingList listnetworkingv1.IngressLister
+	ingList listnetworkingv1beta1.IngressLister
 
 	svcProc *processor
 	svcList listcorev1.ServiceLister

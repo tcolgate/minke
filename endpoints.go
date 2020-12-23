@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -27,11 +27,11 @@ type serviceAddr struct {
 
 type epsSet map[serviceKey][]serviceAddr
 
-func backendToServiceKey(namespace string, b *networkingv1.IngressBackend) serviceKey {
+func backendToServiceKey(namespace string, b *networkingv1beta1.IngressBackend) serviceKey {
 	res := serviceKey{
 		namespace: namespace,
-		name:      b.Service.Name,
-		portName:  b.Service.Port.Name,
+		name:      b.ServiceName,
+		portName:  b.ServicePort.String(),
 	}
 	return res
 }
