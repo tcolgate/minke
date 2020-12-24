@@ -85,13 +85,14 @@ func (u *svcUpdater) getServicePortScheme(key serviceKey) string {
 
 	if proto, ok := v.appProtos[key.portName]; ok {
 		switch proto {
-		case "HTTP":
+		case "HTTP", "http":
 			return "http"
-		case "HTTP2":
+		case "HTTP2", "http2":
 			return "http2"
 		case "HTTPS":
 			return "https"
 		default:
+			// this should be logged and metric'd
 			return "http"
 		}
 	}

@@ -2,6 +2,7 @@ package minke
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -175,6 +176,9 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 
 	transport2 := &http2.Transport{
 		AllowHTTP: true,
+		DialTLS: func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
+			return net.Dial(netw, addr)
+		},
 	}
 
 	transport := &httpTransport{
@@ -191,7 +195,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 
 	if c.metrics != nil {
 		c.Handler = c.metrics.NewHTTPServerMetrics(c.Handler)
-		c.transport = c.metrics.NewHTTPTransportMetrics(c.transport)
+		c.transport = c.metrics.NewHTTPTransportMetrics(transport)
 	}
 
 	if c.tracer != nil {

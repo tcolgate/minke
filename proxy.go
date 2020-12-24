@@ -19,7 +19,7 @@ func (t *httpTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	// as we've got a port int he URL, the scheme is ignored.
 	case "http2", "grpc":
 		r.URL.Scheme = "http"
-		log.Print("r.URL", r.URL)
+		log.Printf("r %#v", r)
 		return t.http2.RoundTrip(r)
 	default:
 		return t.base.RoundTrip(r)
@@ -47,6 +47,7 @@ func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 	}
 
 	if len(eps) > 1 {
+		// TODO: this need to do the balancing thing
 		return eps[rand.Intn(len(eps)-1)], port
 	}
 

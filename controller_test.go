@@ -3,6 +3,7 @@ package minke
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -14,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1beta1 "k8s.io/api/networking/v1beta1"
@@ -419,9 +421,13 @@ func TestWebsocket(t *testing.T) {
 }
 
 func TestHTTP2Backend(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h2s := &http2.Server{}
+
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "OK")
-	}))
+	})
+
+	ts := httptest.NewServer(h2c.NewHandler(h, h2s))
 	defer ts.Close()
 
 	http2.ConfigureServer(ts.Config, &http2.Server{})
@@ -512,8 +518,6 @@ func TestHTTP2Backend(t *testing.T) {
 	pts := httptest.NewServer(ctrl)
 	defer pts.Close()
 
-	h := http.Header{}
-	h.Set("Host", "blah")
 	ctrlu, _ := url.Parse(pts.URL)
 	ctrlu.Scheme = "http"
 	ctrlu.Path = "/"
@@ -525,5 +529,13 @@ func TestHTTP2Backend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got error %v", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	t.Logf("http2 http resp: %v", resp)
+
+	bs, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Logf("http2 http read resp: %v", err)
+	}
+
+	t.Logf("http2 http resp body: %s", bs)
 }
