@@ -2,21 +2,23 @@
 
 Principles:
 
+- All certs are taken from cluster secrets, this make live update easy without the
+  need for filesystem watching.
 - Merge kubernetes Ingress
   - allows a single LB, and DNS entry to have paths served by
     different pods.
   - "unmerging" can be supported by selector and ingress classes.
 - Stick to the "Spec"
+  - PathType is respected, all the examples in the docs should be tested and
+    behave as documented.
   - IngressController behaviour is a bit vague, but we go by the word of the
-    spec. Paths are POSIX regex, anchored at the start, open at the end.
-    - An annotation may be provided to support plain prefix matching if
-      a considerable performance benefit can be proven
+    spec. Paths are re2 regex, anchored at the start, open at the end.
 - Minimize features.
   - If something can be achieved by running multiple controllers,
     e.g. http vs https handling, blocking, http redirect, we will not provide
     magic to do it for you.
   - Rely on http.ReverseProxy with two exceptions.
-    - Support h2c http2 backends.
+    - Support h2c to unencrypted http2 backends.
 - Maximize observability.
   - Out of the box OpenTracing support (at least jaeger, probably zipkin).
   - Out of the box prometheus metrics.
@@ -48,6 +50,6 @@ Incoming traffic is then processed as follows:
 - If no backend is selected a 502 response is returned to the client.
 
 Once a backend is selected the set of associated endpointed are queried.
-
 - At present the only selection strategy is random.
+- should support alternative strategies, selectable by an annotation.
 

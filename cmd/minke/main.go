@@ -17,7 +17,7 @@ import (
 
 	klog "k8s.io/klog/v2"
 
-	"github.com/lucas-clemente/quic-go/h2quic"
+	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tcolgate/minke"
@@ -34,11 +34,12 @@ var (
 	httpAddr  = flag.String("addr.http", ":80", "address to serve http")
 	httpsAddr = flag.String("addr.https", ":443", "address to server http/http2/quic")
 
-	defaultCert   = flag.String("tls.default.cert", "cert.pem", "location of default cert")
-	defaultKey    = flag.String("tls.default.key", "key.pem", "location of default key")
-	defaultCACert = flag.String("tls..clientca", "", "ca to accept client connection from")
+	defaultCert  = flag.String("tls.default.cert", "cert.pem", "location of default cert")
+	defaultKey   = flag.String("tls.default.key", "key.pem", "location of default key")
+	clientCACert = flag.String("tls.clientca", "", "ca to accept client connection from")
 
-	defaultClientCA   = flag.String("tls.client.cacert", "", "ca to trust for client connections")
+	defaultClientCA = flag.String("tls.client.cacert", "", "ca to trust for client connections")
+
 	defaultClientCert = flag.String("tls.client.cert", "", "location cert to present for https client")
 	defaultClientKey  = flag.String("tls.client.key", "", "location key to use for https client")
 )
@@ -160,16 +161,16 @@ func main() {
 		return err
 	})
 
-	quicserver := h2quic.Server{
+	http3server := http3.Server{
 		Server: tlsServer,
 	}
 
 	g.Go(func() error {
-		return quicserver.ListenAndServe()
+		return http3server.ListenAndServe()
 	})
 
 	<-ctx.Done()
-	quicserver.CloseGracefully(5 * time.Second)
+	http3server.CloseGracefully(5 * time.Second)
 	server.Shutdown(context.Background())
 	if err := ctx.Err(); err != nil {
 		os.Exit(1)

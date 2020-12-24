@@ -181,7 +181,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		},
 	}
 
-	transport := &httpTransport{
+	c.transport = &httpTransport{
 		base:  transport1,
 		http2: transport2,
 	}
@@ -190,12 +190,12 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		Director:      c.director,
 		ErrorLog:      nil,
 		FlushInterval: 1 * time.Millisecond,
-		Transport:     transport,
+		Transport:     c.transport,
 	}
 
 	if c.metrics != nil {
 		c.Handler = c.metrics.NewHTTPServerMetrics(c.Handler)
-		c.transport = c.metrics.NewHTTPTransportMetrics(transport)
+		c.transport = c.metrics.NewHTTPTransportMetrics(c.transport)
 	}
 
 	if c.tracer != nil {
