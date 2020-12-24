@@ -29,6 +29,17 @@ func (u *secUpdater) addItem(obj interface{}) error {
 	if !ok {
 		return nil
 	}
+
+	if sobj.Data == nil {
+		return nil
+	}
+
+	_, hasCert := sobj.Data["tls.crt"]
+	_, hasKey := sobj.Data["tls.key"]
+	if !hasCert || !hasKey {
+		return nil
+	}
+
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -67,10 +78,10 @@ func (c *Controller) setupSecretProcess(ctx context.Context) error {
 	c.secProc = makeProcessor(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.client.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, options)
+				return c.client.CoreV1().Secrets(c.namespace).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.client.CoreV1().Secrets(metav1.NamespaceAll).Watch(ctx, options)
+				return c.client.CoreV1().Secrets(c.namespace).Watch(ctx, options)
 			},
 		},
 		&corev1.Secret{},

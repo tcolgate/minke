@@ -37,6 +37,9 @@ func (u *svcUpdater) addItem(obj interface{}) error {
 	if !ok {
 		return nil
 	}
+
+	klog.Infof("service added, %s/%s", sobj.GetNamespace(), sobj.GetName())
+
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -66,6 +69,8 @@ func (u *svcUpdater) delItem(obj interface{}) error {
 	if !ok {
 		return nil
 	}
+
+	klog.Infof("service removed, %s/%s", sobj.GetNamespace(), sobj.GetName())
 
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -108,10 +113,10 @@ func (c *Controller) setupServiceProcess(ctx context.Context) error {
 	c.svcProc = makeProcessor(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.client.CoreV1().Services(metav1.NamespaceAll).List(ctx, options)
+				return c.client.CoreV1().Services(c.namespace).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.client.CoreV1().Services(metav1.NamespaceAll).Watch(ctx, options)
+				return c.client.CoreV1().Services(c.namespace).Watch(ctx, options)
 			},
 		},
 		&corev1.Service{},

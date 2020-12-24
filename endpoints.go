@@ -101,10 +101,10 @@ func (c *Controller) setupEndpointsProcess(ctx context.Context) error {
 	c.epsProc = makeProcessor(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.client.CoreV1().Endpoints(metav1.NamespaceAll).List(ctx, options)
+				return c.client.CoreV1().Endpoints(c.namespace).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.client.CoreV1().Endpoints(metav1.NamespaceAll).Watch(ctx, options)
+				return c.client.CoreV1().Endpoints(c.namespace).Watch(ctx, options)
 			},
 		},
 		&corev1.Endpoints{},

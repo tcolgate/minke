@@ -10,6 +10,8 @@ import (
 	"os"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -29,6 +31,9 @@ func init() {
 var (
 	masterURL  = flag.String("master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
 	kubeconfig = flag.String("kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
+
+	namespace = flag.String("namespace", metav1.NamespaceAll, "namespace to watch resources")
+	selector  = flag.String("l", "", "label selector to match ingresses")
 
 	adminAddr = flag.String("addr.admin", ":8080", "address to provide metrics")
 	httpAddr  = flag.String("addr.http", ":80", "address to serve http")
@@ -71,7 +76,16 @@ func main() {
 		panic(err.Error())
 	}
 
-	ctrl, err := minke.New(clientset)
+	selector, err := labels.Parse(*selector)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	ctrl, err := minke.New(
+		clientset,
+		minke.WithNamespace(*namespace),
+		minke.WithSelector(selector),
+	)
 	if err != nil {
 		log.Fatalf("error creating controller, err = %v", err)
 		return

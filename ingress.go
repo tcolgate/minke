@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/klog"
 
 	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	listnetworkingv1beta1 "k8s.io/client-go/listers/networking/v1beta1"
@@ -170,6 +171,8 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
 
+	klog.Infof("ingress added, %s/%s", ing.GetNamespace(), ing.GetName())
+
 	if !u.c.ourClass(ing) {
 		return nil
 	}
@@ -245,6 +248,8 @@ func (u *ingUpdater) delItem(obj interface{}) error {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
 
+	klog.Infof("ingress removed, %s/%s", ing.GetNamespace(), ing.GetName())
+
 	u.c.mutex.Lock()
 	defer u.c.mutex.Unlock()
 
@@ -270,11 +275,11 @@ func (c *Controller) setupIngProcess(ctx context.Context) error {
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.NetworkingV1beta1().Ingresses(metav1.NamespaceAll).List(ctx, options)
+				return c.client.NetworkingV1beta1().Ingresses(c.namespace).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				options.LabelSelector = c.selector.String()
-				return c.client.NetworkingV1beta1().Ingresses(metav1.NamespaceAll).Watch(ctx, options)
+				return c.client.NetworkingV1beta1().Ingresses(c.namespace).Watch(ctx, options)
 			},
 		},
 		&networkingv1beta1.Ingress{},

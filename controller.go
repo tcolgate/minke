@@ -15,6 +15,7 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 
 	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"k8s.io/client-go/kubernetes"
@@ -30,7 +31,7 @@ import (
 // Controller is the main thing
 type Controller struct {
 	client        kubernetes.Interface
-	namespaces    []string
+	namespace     string
 	class         string
 	selector      labels.Selector
 	refresh       time.Duration
@@ -79,9 +80,9 @@ func WithClass(cls string) Option {
 }
 
 // WithNamespaces is an option for setting the set of namespaces to watch
-func WithNamespaces(ns []string) Option {
+func WithNamespace(ns string) Option {
 	return func(c *Controller) error {
-		c.namespaces = ns
+		c.namespace = ns
 		return nil
 	}
 }
@@ -131,13 +132,13 @@ func WithMetricsProvider(m MetricsProvider) Option {
 // New creates a new one
 func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c := Controller{
-		client:     client,
-		class:      "minke",
-		namespaces: []string{""},
-		mutex:      sync.RWMutex{},
-		selector:   labels.Everything(),
-		metrics:    metricsProvider,
-		tracer:     otel.Tracer("minke"),
+		client:    client,
+		class:     "minke",
+		namespace: metav1.NamespaceAll,
+		mutex:     sync.RWMutex{},
+		selector:  labels.Everything(),
+		metrics:   metricsProvider,
+		tracer:    otel.Tracer("minke"),
 
 		eps: make(map[serviceKey][]serviceAddr),
 	}
