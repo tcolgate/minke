@@ -46,7 +46,6 @@ type Controller struct {
 	defaultTLSSecretNamespace  string
 	defaultTLSSecretName       string
 	defaultTLSCertificateMutex sync.RWMutex
-	defaultTLSCertificate      *tls.Certificate
 
 	clientTLSConfig           *tls.Config
 	clientTLSSecretNamespace  string

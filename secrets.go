@@ -1,5 +1,8 @@
 package minke
 
+// TODO: needs to a way to load CAs instead of full unlocked
+// certs (for HTTPS client, and tls peer verification.
+
 import (
 	"context"
 	"crypto/tls"

@@ -72,7 +72,10 @@ func (c *Controller) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate
 	if certKey.namespace == "" {
 		c.defaultTLSCertificateMutex.RLock()
 		c.defaultTLSCertificateMutex.RUnlock()
-		return c.defaultTLSCertificate, nil
+		return c.secs.getCert(secretKey{
+			namespace: c.svc.c.defaultTLSSecretNamespace,
+			name:      c.svc.c.defaultTLSSecretName,
+		}), nil
 	}
 
 	return c.secs.getCert(certKey), nil
