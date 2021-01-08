@@ -2,6 +2,7 @@ package minke
 
 import (
 	"context"
+	"crypto/tls"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -14,14 +15,48 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-type secKey struct {
+type secretKey struct {
 	namespace, name string
 }
 
 type secUpdater struct {
 	c       *Controller
 	mu      sync.RWMutex
-	secrets map[secKey]map[string][]byte
+	secrets map[secretKey]map[string][]byte
+
+	cacheMu sync.RWMutex
+	certs   map[secretKey]*tls.Certificate
+}
+
+func (u *secUpdater) updateCert(key secretKey, sec map[string][]byte) *tls.Certificate {
+	certBytes := sec[`tls.crt`]
+	keyBytes := sec[`tls.key`]
+	if len(certBytes) == 0 || len(keyBytes) == 0 {
+		// key or cert not specified
+		return nil
+	}
+
+	newcert, err := tls.X509KeyPair(certBytes, keyBytes)
+	if err != nil {
+		return nil
+	}
+	u.cacheMu.Lock()
+	u.certs[key] = &newcert
+	u.cacheMu.Unlock()
+
+	return &newcert
+}
+
+func (u *secUpdater) getCert(key secretKey) *tls.Certificate {
+	u.cacheMu.RLock()
+	cert, ok := u.certs[key]
+	u.cacheMu.RUnlock()
+	if ok {
+		return cert
+	}
+
+	sec := u.getSecret(key.namespace, key.name)
+	return u.updateCert(key, sec)
 }
 
 func (u *secUpdater) addItem(obj interface{}) error {
@@ -40,11 +75,21 @@ func (u *secUpdater) addItem(obj interface{}) error {
 		return nil
 	}
 
+	key := secretKey{sobj.Namespace, sobj.Name}
 	u.mu.Lock()
-	defer u.mu.Unlock()
-
 	klog.Infof("secret added, %s/%s", sobj.GetNamespace(), sobj.GetName())
-	u.secrets[secKey{sobj.Namespace, sobj.Name}] = sobj.Data
+	u.secrets[key] = sobj.Data
+	u.mu.Unlock()
+
+	// if the cert is already present, we'll update it
+	u.cacheMu.RLock()
+	_, ok = u.certs[key]
+	u.cacheMu.RUnlock()
+
+	if ok {
+		u.updateCert(key, sobj.Data)
+	}
+
 	return nil
 }
 
@@ -54,25 +99,28 @@ func (u *secUpdater) delItem(obj interface{}) error {
 		return nil
 	}
 
+	u.cacheMu.Lock()
+	defer u.cacheMu.Unlock()
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	klog.Infof("secret deleted, %s/%s", sobj.GetNamespace(), sobj.GetName())
-	delete(u.secrets, secKey{sobj.Namespace, sobj.Name})
+	delete(u.secrets, secretKey{sobj.Namespace, sobj.Name})
+	delete(u.certs, secretKey{sobj.Namespace, sobj.Name})
 	return nil
 }
 
 func (u *secUpdater) getSecret(namespace, name string) map[string][]byte {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
-	vs, _ := u.secrets[secKey{namespace, name}]
+	vs, _ := u.secrets[secretKey{namespace, name}]
 	return vs
 }
 
 func (c *Controller) setupSecretProcess(ctx context.Context) error {
 	upd := &secUpdater{
 		c:       c,
-		secrets: make(map[secKey]map[string][]byte),
+		secrets: make(map[secretKey]map[string][]byte),
 	}
 
 	c.secProc = makeProcessor(
@@ -90,10 +138,7 @@ func (c *Controller) setupSecretProcess(ctx context.Context) error {
 	)
 
 	c.secList = listcorev1.NewSecretLister(c.secProc.informer.GetIndexer())
+	c.secs = upd
 
-	return nil
-}
-
-func (c *Controller) processSecItem(string) error {
 	return nil
 }

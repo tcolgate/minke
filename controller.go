@@ -78,10 +78,10 @@ type Controller struct {
 	metrics MetricsProvider
 	tracer  trace.Tracer
 
-	eps epsSet // Service to endpoints mapping
-
-	ings ingressSet // Hostnames to ingress mapping
-	svc  *svcUpdater
+	ings ingressSet  // Hostnames to ingress mapping and certs
+	svc  *svcUpdater // Service to ports/protocols mapping
+	eps  epsSet      // Service to endpoints mapping
+	secs *secUpdater // Secrets
 }
 
 // Option for setting controller properties

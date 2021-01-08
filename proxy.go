@@ -68,13 +68,14 @@ func (c *Controller) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate
 		return nil, nil
 	}
 
-	cert, _ := c.ings.GetCertificate(info)
-	if cert == nil {
+	certKey, _ := c.ings.getCertSecret(info)
+	if certKey.namespace == "" {
 		c.defaultTLSCertificateMutex.RLock()
 		c.defaultTLSCertificateMutex.RUnlock()
 		return c.defaultTLSCertificate, nil
 	}
-	return cert, nil
+
+	return c.secs.getCert(certKey), nil
 }
 
 // GetClientCertificate selects a cert from an ingress if one is available.

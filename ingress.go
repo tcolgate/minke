@@ -35,7 +35,7 @@ type ingress struct {
 	priority       *int
 	defaultBackend *serviceKey
 	rules          []ingressRule
-	cert           *tls.Certificate
+	certKey        secretKey
 }
 
 type ingressRule struct {
@@ -147,16 +147,16 @@ func (is *ingressSet) getServiceKey(r *http.Request) (serviceKey, bool) {
 	return serviceKey{}, false
 }
 
-func (is *ingressSet) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (is *ingressSet) getCertSecret(info *tls.ClientHelloInfo) (secretKey, error) {
 	is.RLock()
 	defer is.RUnlock()
 
 	// TODO: gibberish, must pick cert properly
 	h := is.set[info.ServerName]
 	if len(h) == 0 {
-		return nil, nil
+		return secretKey{}, nil
 	}
-	return h[0].cert, nil
+	return h[0].certKey, nil
 }
 
 type ingUpdater struct {
