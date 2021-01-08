@@ -1,6 +1,7 @@
 package minke
 
 import (
+	"crypto/tls"
 	"log"
 	"math/rand"
 	"net"
@@ -30,7 +31,6 @@ func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 	var ok bool
 	c.mutex.RLock()
 	ings := c.ings
-	epss := c.eps
 	c.mutex.RUnlock()
 
 	key, ok := ings.getServiceKey(req)
@@ -40,7 +40,7 @@ func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 
 	port := c.svc.getServicePortScheme(key)
 
-	eps, _ := epss[key]
+	eps := c.eps.getActiveAddrs(key)
 
 	if len(eps) == 1 {
 		return eps[0], port
@@ -63,4 +63,28 @@ func (c *Controller) director(req *http.Request) {
 		// explicitly disable User-Agent so it's not set to default value
 		req.Header.Set("User-Agent", "")
 	}
+}
+
+// GetCertificate selects a cert from an ingress if one is available.
+func (c *Controller) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if info.ServerName == "" {
+		return nil, nil
+	}
+
+	// TODO: this is rubbish, need proper wildccard support.
+	// and should probably pick the first valid cert.
+	hg, ok := c.ings[info.ServerName]
+	if !ok || len(hg) == 0 {
+		c.defaultTLSCertificateMutex.RLock()
+		c.defaultTLSCertificateMutex.RUnlock()
+		return c.defaultTLSCertificate, nil
+	}
+	return hg[0].cert, nil
+}
+
+// GetClientCertificate selects a cert from an ingress if one is available.
+func (c *Controller) GetClientCertificate(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	c.clientTLSCertificateMutex.RLock()
+	defer c.clientTLSCertificateMutex.RUnlock()
+	return c.clientTLSCertificate, nil
 }

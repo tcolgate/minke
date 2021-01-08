@@ -39,14 +39,11 @@ var (
 	httpAddr  = flag.String("addr.http", ":80", "address to serve http")
 	httpsAddr = flag.String("addr.https", ":443", "address to server http/http2/quic")
 
-	defaultCert  = flag.String("tls.default.cert", "cert.pem", "location of default cert")
-	defaultKey   = flag.String("tls.default.key", "key.pem", "location of default key")
-	clientCACert = flag.String("tls.clientca", "", "ca to accept client connection from")
+	serverTLSDefaultSecret  = flag.String("tls.server.default.secret", "", "the NAMESPACE/NAME of the default TLS secret ")
+	serverTLSClientCASecret = flag.String("tls.server.clientca.secret", "", "")
 
-	defaultClientCA = flag.String("tls.client.cacert", "", "ca to trust for client connections")
-
-	defaultClientCert = flag.String("tls.client.cert", "", "location cert to present for https client")
-	defaultClientKey  = flag.String("tls.client.key", "", "location key to use for https client")
+	clientTLSSecret = flag.String("tls.client.secret", "", "location cert to present for https client")
+	clientTLSCA     = flag.String("tls.client.ca.secret", "", "CA to trust for client connections")
 )
 
 func main() {
@@ -81,10 +78,39 @@ func main() {
 		panic(err.Error())
 	}
 
+	ciphers := []uint16{
+		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305, // Go 1.8 only
+		tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,   // Go 1.8 only
+		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+
+		// Best disabled, as they don't provide Forward Secrecy,
+		// but might be necessary for some clients
+		// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+		// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+	}
+	curves := []tls.CurveID{
+		tls.CurveP256,
+		tls.X25519, // Go 1.8 only
+	}
+	tlsMinVersion := uint16(tls.VersionTLS12)
+
+	tlsClientConfig := &tls.Config{
+		PreferServerCipherSuites: true,
+		CurvePreferences:         curves,
+		MinVersion:               tlsMinVersion,
+		CipherSuites:             ciphers,
+	}
+
 	ctrl, err := minke.New(
 		clientset,
 		minke.WithNamespace(*namespace),
 		minke.WithSelector(selector),
+		minke.WithDefaultTLSSecret(*serverTLSDefaultSecret),
+		minke.WithClientTLSConfig(tlsClientConfig),
+		minke.WithClientTLSSecret(*clientTLSSecret),
 	)
 	if err != nil {
 		log.Fatalf("error creating controller, err = %v", err)
@@ -128,34 +154,12 @@ func main() {
 		return err
 	})
 
-	cert, err := tls.LoadX509KeyPair(*defaultCert, *defaultKey)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
 	tlsConfig := &tls.Config{
 		PreferServerCipherSuites: true,
-		CurvePreferences: []tls.CurveID{
-			tls.CurveP256,
-			tls.X25519, // Go 1.8 only
-		},
-		MinVersion: tls.VersionTLS12,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305, // Go 1.8 only
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,   // Go 1.8 only
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-
-			// Best disabled, as they don't provide Forward Secrecy,
-			// but might be necessary for some clients
-			// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-		},
-		Certificates:   []tls.Certificate{cert},
-		GetCertificate: ctrl.GetCertificate,
+		CurvePreferences:         curves,
+		MinVersion:               tlsMinVersion,
+		CipherSuites:             ciphers,
+		GetCertificate:           ctrl.GetCertificate,
 	}
 
 	tlsServer := &http.Server{
@@ -165,6 +169,7 @@ func main() {
 		Handler:      ctrl,
 		TLSConfig:    tlsConfig,
 	}
+
 	g.Go(func() error {
 		tlsl, err := tls.Listen("tcp", *httpsAddr, tlsConfig)
 		if err != nil {

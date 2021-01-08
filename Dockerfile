@@ -1,6 +1,9 @@
-FROM golang:latest
-RUN mkdir -p /go/src/github.com/tcolgate/minke
-ADD . /go/src/github.com/tcolgate/minke/
-WORKDIR /go/src/github.com/tcolgate/minke
-RUN go build -o minke ./cmd/minke
-ENTRYPOINT ["/go/src/github.com/tcolgate/minke/minke"]
+FROM golang:1.15-alpine AS build
+RUN mkdir -p /src
+ADD . /src
+WORKDIR /src
+RUN go build -o /minke ./cmd/minke
+ENTRYPOINT ["/minke"]
+FROM alpine:latest
+COPY --from=build /minke /minke
+ENTRYPOINT ["/minke"]

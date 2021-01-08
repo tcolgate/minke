@@ -17,6 +17,10 @@ spec:
     port: 443
     protocol: TCP
     targetPort: 443
+  - name: http3
+    port: 443
+    protocol: UDP
+    targetPort: 443
   - name: admin
     port: 8080
     protocol: TCP

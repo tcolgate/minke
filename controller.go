@@ -3,9 +3,11 @@ package minke
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,20 @@ type Controller struct {
 	logFunc       func(string, ...interface{})
 	accessLogFunc func(string, ...interface{})
 
+	defaultBackendNamespace string
+	defaultBackendName      string
+
+	defaultTLSSecretNamespace  string
+	defaultTLSSecretName       string
+	defaultTLSCertificateMutex sync.RWMutex
+	defaultTLSCertificate      *tls.Certificate
+
+	clientTLSConfig           *tls.Config
+	clientTLSSecretNamespace  string
+	clientTLSSecretName       string
+	clientTLSCertificate      *tls.Certificate
+	clientTLSCertificateMutex sync.RWMutex
+
 	ingProc *processor
 	ingList listnetworkingv1beta1.IngressLister
 
@@ -62,9 +78,10 @@ type Controller struct {
 	metrics MetricsProvider
 	tracer  trace.Tracer
 
+	eps epsSet // Service to endpoints mapping
+
 	mutex sync.RWMutex
 	ings  ingressSet // Hostnames to ingress mapping
-	eps   epsSet     // Service to endpoints mapping
 	svc   *svcUpdater
 }
 
@@ -92,6 +109,61 @@ func WithNamespace(ns string) Option {
 func WithSelector(s labels.Selector) Option {
 	return func(c *Controller) error {
 		c.selector = s
+		return nil
+	}
+}
+
+func WithDefaultBackend(str string) Option {
+	return func(c *Controller) error {
+		parts := strings.SplitN(str, "/", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("default backend service should be in the for of NAMESPACE/NAME")
+		}
+
+		c.defaultBackendNamespace = parts[0]
+		c.defaultBackendName = parts[1]
+		return nil
+	}
+}
+
+func WithDefaultTLSSecret(str string) Option {
+	return func(c *Controller) error {
+		if str == "" {
+			return nil
+		}
+		parts := strings.SplitN(str, "/", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("default TLS secret should be in the for of NAMESPACE/NAME")
+		}
+
+		c.defaultTLSSecretNamespace = parts[0]
+		c.defaultTLSSecretName = parts[1]
+		return nil
+	}
+}
+
+func WithClientTLSSecret(str string) Option {
+	return func(c *Controller) error {
+		if str == "" {
+			return nil
+		}
+		parts := strings.SplitN(str, "/", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("default client TLS secret should be in the for of NAMESPACE/NAME")
+		}
+
+		c.clientTLSSecretNamespace = parts[0]
+		c.clientTLSSecretName = parts[1]
+		return nil
+	}
+}
+
+func WithClientTLSConfig(cfg *tls.Config) Option {
+	return func(c *Controller) error {
+		if cfg == nil {
+			return nil
+		}
+		c.clientTLSConfig = cfg.Clone()
 		return nil
 	}
 }
@@ -132,15 +204,15 @@ func WithMetricsProvider(m MetricsProvider) Option {
 // New creates a new one
 func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c := Controller{
-		client:    client,
-		class:     "minke",
-		namespace: metav1.NamespaceAll,
-		mutex:     sync.RWMutex{},
-		selector:  labels.Everything(),
-		metrics:   metricsProvider,
-		tracer:    otel.Tracer("minke"),
-
-		eps: make(map[serviceKey][]serviceAddr),
+		client:          client,
+		class:           "minke",
+		namespace:       metav1.NamespaceAll,
+		mutex:           sync.RWMutex{},
+		selector:        labels.Everything(),
+		metrics:         metricsProvider,
+		tracer:          otel.Tracer("minke"),
+		clientTLSConfig: &tls.Config{},
+		eps:             epsSet{set: make(map[serviceKey][]serviceAddr)},
 	}
 
 	for _, opt := range opts {
@@ -163,6 +235,8 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.setupSecretProcess(ctx)
 	c.setupEndpointsProcess(ctx)
 
+	c.clientTLSConfig.GetClientCertificate = c.GetClientCertificate
+
 	transport1 := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
@@ -173,6 +247,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig:       c.clientTLSConfig,
 	}
 
 	transport2 := &http2.Transport{

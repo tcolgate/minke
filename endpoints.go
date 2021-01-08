@@ -3,6 +3,7 @@ package minke
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1beta1 "k8s.io/api/networking/v1beta1"
@@ -25,19 +26,33 @@ type serviceAddr struct {
 	port int
 }
 
-type epsSet map[serviceKey][]serviceAddr
+type epsSet struct {
+	set map[serviceKey][]serviceAddr
+	sync.RWMutex
+}
 
 func backendToServiceKey(namespace string, b *networkingv1beta1.IngressBackend) serviceKey {
-	res := serviceKey{
+	if b.ServicePort.IntVal != 0 {
+		return serviceKey{
+			namespace: namespace,
+			name:      b.ServiceName,
+		}
+	}
+	return serviceKey{
 		namespace: namespace,
 		name:      b.ServiceName,
 		portName:  b.ServicePort.String(),
 	}
-	return res
 }
 
 type epsUpdater struct {
 	c *Controller
+}
+
+func (eps *epsSet) getActiveAddrs(key serviceKey) []serviceAddr {
+	eps.RLock()
+	defer eps.RUnlock()
+	return eps.set[key]
 }
 
 func (u *epsUpdater) addItem(obj interface{}) error {
@@ -46,27 +61,46 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
 
-	u.c.mutex.Lock()
-	defer u.c.mutex.Unlock()
 	u.clearEndpoints(eps.Namespace, eps.Name)
+
+	portlessKey := serviceKey{
+		namespace: eps.Namespace,
+		name:      eps.Name,
+	}
 
 	for i := range eps.Subsets {
 		set := eps.Subsets[i]
+		portlessAddrs := make([]serviceAddr, len(set.Addresses))
+
+		for j := range set.Addresses {
+			portlessAddrs[j] = serviceAddr{
+				addr: set.Addresses[j].IP,
+			}
+		}
+		u.c.eps.Lock()
+		u.c.eps.set[portlessKey] = append(u.c.eps.set[portlessKey], portlessAddrs...)
+		u.c.eps.Unlock()
+
 		for j := range set.Ports {
-			port := set.Ports[j].Port
 			key := serviceKey{
 				namespace: eps.Namespace,
 				name:      eps.Name,
 				portName:  set.Ports[j].Name,
 			}
-			var addrs []serviceAddr
-			for k := range set.Addresses {
-				addrs = append(addrs, serviceAddr{
-					addr: set.Addresses[k].IP,
+
+			addrs := make([]serviceAddr, len(set.Addresses))
+
+			port := set.Ports[j].Port
+
+			for j := range set.Addresses {
+				addrs[j] = serviceAddr{
+					addr: set.Addresses[j].IP,
 					port: int(port),
-				})
+				}
 			}
-			u.c.eps[key] = addrs
+			u.c.eps.Lock()
+			u.c.eps.set[key] = append(u.c.eps.set[key], addrs...)
+			u.c.eps.Unlock()
 		}
 	}
 
@@ -74,10 +108,12 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 }
 
 func (u *epsUpdater) clearEndpoints(name, namespace string) {
-	for key := range u.c.eps {
+	u.c.eps.Lock()
+	defer u.c.eps.Unlock()
+	for key := range u.c.eps.set {
 		if key.namespace == namespace &&
 			key.name == name {
-			delete(u.c.eps, key)
+			delete(u.c.eps.set, key)
 		}
 	}
 }
@@ -88,8 +124,8 @@ func (u *epsUpdater) delItem(obj interface{}) error {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
 
-	u.c.mutex.Lock()
-	defer u.c.mutex.Unlock()
+	u.c.eps.Lock()
+	defer u.c.eps.Unlock()
 	u.clearEndpoints(eps.Namespace, eps.Name)
 
 	return nil
@@ -114,9 +150,5 @@ func (c *Controller) setupEndpointsProcess(ctx context.Context) error {
 
 	c.epsList = listcorev1.NewEndpointsLister(c.epsProc.informer.GetIndexer())
 
-	return nil
-}
-
-func (c *Controller) processEndpointsItem(string) error {
 	return nil
 }

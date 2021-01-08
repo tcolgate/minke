@@ -1,10 +1,13 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: minke
   labels:
     app: minke
 spec:
+  selector:
+    matchLabels:
+      app: minke
   replicas: 2
   template:
     metadata:
@@ -13,7 +16,7 @@ spec:
     spec:
       containers:
       - name: minke
-        image: "minke:v5"
+        image: "minke:latest"
         imagePullPolicy: IfNotPresent
         ports:
           - name: http
@@ -24,9 +27,9 @@ spec:
             containerPort: 443
             protocol: TCP
         ports:
-          - name: admin
-            containerPort: 8080
-            protocol: TCP
+          - name: http3
+            containerPort: 443
+            protocol: UDP
         volumeMounts: []
       - name: jaeger-agent
         image: jaegertracing/jaeger-agent
