@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -19,7 +20,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-type ingressSet map[string]ingressHostGroup
+type ingressSet struct {
+	sync.RWMutex
+	set map[string]ingressHostGroup
+}
 
 type ingressHostGroup []ingress
 
@@ -122,22 +126,37 @@ func (ings ingressHostGroup) getServiceKey(r *http.Request) (serviceKey, bool) {
 	return serviceKey{}, false
 }
 
-func (is ingressSet) getServiceKey(r *http.Request) (serviceKey, bool) {
+func (is *ingressSet) getServiceKey(r *http.Request) (serviceKey, bool) {
+	is.RLock()
+	defer is.RUnlock()
+
 	if is == nil {
 		return serviceKey{}, false
 	}
 
-	ings, _ := is[r.Host]
+	ings, _ := is.set[r.Host]
 	if key, ok := ings.getServiceKey(r); ok {
 		return key, ok
 	}
 
-	ings, _ = is[""]
+	ings, _ = is.set[""]
 	if key, ok := ings.getServiceKey(r); ok {
 		return key, ok
 	}
 
 	return serviceKey{}, false
+}
+
+func (is *ingressSet) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	is.RLock()
+	defer is.RUnlock()
+
+	// TODO: gibberish, must pick cert properly
+	h := is.set[info.ServerName]
+	if len(h) == 0 {
+		return nil, nil
+	}
+	return h[0].cert, nil
 }
 
 type ingUpdater struct {
@@ -177,7 +196,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		return nil
 	}
 
-	newset := make(ingressSet)
+	newset := make(map[string]ingressHostGroup)
 	for _, ingr := range ing.Spec.Rules {
 		ning := ingress{
 			name:      ing.ObjectMeta.Name,
@@ -214,29 +233,29 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		newset[ingr.Host] = append(old, ning)
 	}
 
-	u.c.mutex.Lock()
-	defer u.c.mutex.Unlock()
+	u.c.ings.Lock()
+	defer u.c.ings.Unlock()
 
-	if u.c.ings == nil {
-		u.c.ings = make(ingressSet)
+	if u.c.ings.set == nil {
+		u.c.ings.set = make(map[string]ingressHostGroup)
 	}
 
-	for n := range u.c.ings {
+	for n := range u.c.ings.set {
 		var nings ingressHostGroup
-		for i := range u.c.ings[n] {
-			if u.c.ings[n][i].name == ing.ObjectMeta.Name &&
-				u.c.ings[n][i].namespace == ing.ObjectMeta.Namespace {
+		for i := range u.c.ings.set[n] {
+			if u.c.ings.set[n][i].name == ing.ObjectMeta.Name &&
+				u.c.ings.set[n][i].namespace == ing.ObjectMeta.Namespace {
 				continue
 			}
-			nings = append(nings, u.c.ings[n][i])
+			nings = append(nings, u.c.ings.set[n][i])
 		}
-		u.c.ings[n] = nings
+		u.c.ings.set[n] = nings
 	}
 
 	for n := range newset {
-		hg := append(u.c.ings[n], newset[n]...)
+		hg := append(u.c.ings.set[n], newset[n]...)
 		sort.Sort(ingressGroupByPriority(hg))
-		u.c.ings[n] = hg
+		u.c.ings.set[n] = hg
 	}
 
 	return nil
@@ -250,19 +269,19 @@ func (u *ingUpdater) delItem(obj interface{}) error {
 
 	klog.Infof("ingress removed, %s/%s", ing.GetNamespace(), ing.GetName())
 
-	u.c.mutex.Lock()
-	defer u.c.mutex.Unlock()
+	u.c.ings.Lock()
+	defer u.c.ings.Unlock()
 
-	for n := range u.c.ings {
+	for n := range u.c.ings.set {
 		var nings ingressHostGroup
-		for i := range u.c.ings[n] {
-			if u.c.ings[n][i].name == ing.ObjectMeta.Name &&
-				u.c.ings[n][i].namespace == ing.ObjectMeta.Namespace {
+		for i := range u.c.ings.set[n] {
+			if u.c.ings.set[n][i].name == ing.ObjectMeta.Name &&
+				u.c.ings.set[n][i].namespace == ing.ObjectMeta.Namespace {
 				continue
 			}
-			nings = append(nings, u.c.ings[n][i])
+			nings = append(nings, u.c.ings.set[n][i])
 		}
-		u.c.ings[n] = nings
+		u.c.ings.set[n] = nings
 	}
 
 	return nil

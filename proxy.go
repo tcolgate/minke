@@ -29,11 +29,8 @@ func (t *httpTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 	var ok bool
-	c.mutex.RLock()
-	ings := c.ings
-	c.mutex.RUnlock()
 
-	key, ok := ings.getServiceKey(req)
+	key, ok := c.ings.getServiceKey(req)
 	if !ok {
 		return serviceAddr{}, ""
 	}
@@ -71,15 +68,13 @@ func (c *Controller) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate
 		return nil, nil
 	}
 
-	// TODO: this is rubbish, need proper wildccard support.
-	// and should probably pick the first valid cert.
-	hg, ok := c.ings[info.ServerName]
-	if !ok || len(hg) == 0 {
+	cert, _ := c.ings.GetCertificate(info)
+	if cert == nil {
 		c.defaultTLSCertificateMutex.RLock()
 		c.defaultTLSCertificateMutex.RUnlock()
 		return c.defaultTLSCertificate, nil
 	}
-	return hg[0].cert, nil
+	return cert, nil
 }
 
 // GetClientCertificate selects a cert from an ingress if one is available.

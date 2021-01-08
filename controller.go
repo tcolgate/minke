@@ -80,9 +80,8 @@ type Controller struct {
 
 	eps epsSet // Service to endpoints mapping
 
-	mutex sync.RWMutex
-	ings  ingressSet // Hostnames to ingress mapping
-	svc   *svcUpdater
+	ings ingressSet // Hostnames to ingress mapping
+	svc  *svcUpdater
 }
 
 // Option for setting controller properties
@@ -207,7 +206,6 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		client:          client,
 		class:           "minke",
 		namespace:       metav1.NamespaceAll,
-		mutex:           sync.RWMutex{},
 		selector:        labels.Everything(),
 		metrics:         metricsProvider,
 		tracer:          otel.Tracer("minke"),
