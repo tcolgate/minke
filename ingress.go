@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -139,6 +140,16 @@ func (is *ingressSet) getServiceKey(r *http.Request) (serviceKey, bool) {
 		return key, ok
 	}
 
+	if len(r.Host) > 0 {
+		name := strings.Split(r.Host, ".")
+		name[0] = "*"
+		wildcardName := strings.Join(name, ".")
+		ings, _ := is.set[wildcardName]
+		if key, ok := ings.getServiceKey(r); ok {
+			return key, ok
+		}
+	}
+
 	ings, _ = is.set[""]
 	if key, ok := ings.getServiceKey(r); ok {
 		return key, ok
@@ -153,10 +164,21 @@ func (is *ingressSet) getCertSecret(info *tls.ClientHelloInfo) (secretKey, error
 
 	// TODO: gibberish, must pick cert properly
 	h := is.set[info.ServerName]
-	if len(h) == 0 {
-		return secretKey{}, nil
+	if len(h) != 0 {
+		return h[0].certKey, nil
 	}
-	return h[0].certKey, nil
+
+	if len(info.ServerName) > 0 {
+		name := strings.Split(info.ServerName, ".")
+		name[0] = "*"
+		wildcardName := strings.Join(name, ".")
+		h := is.set[wildcardName]
+		if len(h) > 0 {
+			return h[0].certKey, nil
+		}
+	}
+
+	return secretKey{}, nil
 }
 
 type ingUpdater struct {
@@ -206,6 +228,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 			key := backendToServiceKey(ing.ObjectMeta.Namespace, ing.Spec.Backend)
 			ning.defaultBackend = &key
 		}
+
 		for _, ingp := range ingr.HTTP.Paths {
 			path := "^/.*"
 			if ingp.Path != "" {

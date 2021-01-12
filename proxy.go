@@ -72,10 +72,12 @@ func (c *Controller) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate
 	if certKey.namespace == "" {
 		c.defaultTLSCertificateMutex.RLock()
 		c.defaultTLSCertificateMutex.RUnlock()
-		return c.secs.getCert(secretKey{
+		defCert := c.secs.getCert(secretKey{
 			namespace: c.svc.c.defaultTLSSecretNamespace,
 			name:      c.svc.c.defaultTLSSecretName,
-		}), nil
+		})
+		log.Printf("send default cert %#v", defCert)
+		return defCert, nil
 	}
 
 	return c.secs.getCert(certKey), nil
@@ -87,3 +89,48 @@ func (c *Controller) GetClientCertificate(info *tls.CertificateRequestInfo) (*tl
 	defer c.clientTLSCertificateMutex.RUnlock()
 	return c.clientTLSCertificate, nil
 }
+
+/* // get certs from the stadlib
+  func (c *Config) getCertificate(clientHello *ClientHelloInfo) (*Certificate, error) {
+		if c.GetCertificate != nil && (len(c.Certificates) == 0 || len(clientHello.ServerName) > 0) {
+			cert, err := c.GetCertificate(clientHello)
+			if cert != nil || err != nil {
+				return cert, err
+			}
+		}
+
+		if len(c.Certificates) == 0 {
+			return nil, errNoCertificates
+		}
+
+		if len(c.Certificates) == 1 {
+			// There's only one choice, so no point doing any work.
+			return &c.Certificates[0], nil
+		}
+
+		if c.NameToCertificate != nil {
+			name := strings.ToLower(clientHello.ServerName)
+			if cert, ok := c.NameToCertificate[name]; ok {
+				return cert, nil
+			}
+			if len(name) > 0 {
+				labels := strings.Split(name, ".")
+				labels[0] = "*"
+				wildcardName := strings.Join(labels, ".")
+				if cert, ok := c.NameToCertificate[wildcardName]; ok {
+					return cert, nil
+				}
+			}
+		}
+
+		for _, cert := range c.Certificates {
+			if err := clientHello.SupportsCertificate(&cert); err == nil {
+				return &cert, nil
+			}
+		}
+
+		// If nothing matches, return the first certificate.
+		return &c.Certificates[0], nil
+	}
+
+*/

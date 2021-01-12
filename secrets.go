@@ -6,6 +6,7 @@ package minke
 import (
 	"context"
 	"crypto/tls"
+	"log"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -40,10 +41,14 @@ func (u *secUpdater) updateCert(key secretKey, sec map[string][]byte) *tls.Certi
 	}
 
 	newcert, err := tls.X509KeyPair(certBytes, keyBytes)
+	log.Printf("got cert %#v", newcert)
 	if err != nil {
 		return nil
 	}
 	u.cacheMu.Lock()
+	if u.certs == nil {
+		u.certs = make(map[secretKey]*tls.Certificate)
+	}
 	u.certs[key] = &newcert
 	u.cacheMu.Unlock()
 
@@ -59,6 +64,7 @@ func (u *secUpdater) getCert(key secretKey) *tls.Certificate {
 	}
 
 	sec := u.getSecret(key.namespace, key.name)
+	log.Printf("got secret %#v", sec)
 	return u.updateCert(key, sec)
 }
 
@@ -116,7 +122,10 @@ func (u *secUpdater) delItem(obj interface{}) error {
 func (u *secUpdater) getSecret(namespace, name string) map[string][]byte {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
-	vs, _ := u.secrets[secretKey{namespace, name}]
+	vs, ok := u.secrets[secretKey{namespace, name}]
+	if !ok {
+		log.Printf("no secret found for %v/%v", namespace, name)
+	}
 	return vs
 }
 

@@ -61,25 +61,21 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
 
-	u.clearEndpoints(eps.Namespace, eps.Name)
-
 	portlessKey := serviceKey{
 		namespace: eps.Namespace,
 		name:      eps.Name,
 	}
 
+	addrs := make(map[serviceKey][]serviceAddr)
+
 	for i := range eps.Subsets {
 		set := eps.Subsets[i]
-		portlessAddrs := make([]serviceAddr, len(set.Addresses))
 
 		for j := range set.Addresses {
-			portlessAddrs[j] = serviceAddr{
+			addrs[portlessKey] = append(addrs[portlessKey], serviceAddr{
 				addr: set.Addresses[j].IP,
-			}
+			})
 		}
-		u.c.eps.Lock()
-		u.c.eps.set[portlessKey] = append(u.c.eps.set[portlessKey], portlessAddrs...)
-		u.c.eps.Unlock()
 
 		for j := range set.Ports {
 			key := serviceKey{
@@ -88,28 +84,27 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 				portName:  set.Ports[j].Name,
 			}
 
-			addrs := make([]serviceAddr, len(set.Addresses))
-
 			port := set.Ports[j].Port
 
 			for j := range set.Addresses {
-				addrs[j] = serviceAddr{
+				addrs[key] = append(addrs[key], serviceAddr{
 					addr: set.Addresses[j].IP,
 					port: int(port),
-				}
+				})
 			}
-			u.c.eps.Lock()
-			u.c.eps.set[key] = append(u.c.eps.set[key], addrs...)
-			u.c.eps.Unlock()
 		}
 	}
+
+	u.c.eps.Lock()
+	for k, v := range addrs {
+		u.c.eps.set[k] = v
+	}
+	u.c.eps.Unlock()
 
 	return nil
 }
 
 func (u *epsUpdater) clearEndpoints(name, namespace string) {
-	u.c.eps.Lock()
-	defer u.c.eps.Unlock()
 	for key := range u.c.eps.set {
 		if key.namespace == namespace &&
 			key.name == name {
