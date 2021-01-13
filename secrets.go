@@ -7,7 +7,9 @@ import (
 	"context"
 	"crypto/tls"
 	"log"
+	"strings"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +20,57 @@ import (
 	listcorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
+
+type certMapEntry struct {
+	cert *tls.Certificate
+	sec  secretKey
+}
+
+// a map of host names to certificates.
+type certMap struct {
+	sync.RWMutex
+	set map[string][]certMapEntry
+}
+
+// GetCertificate checks for non-expired acceptable matches, and then expired acceptable matches
+func (cm *certMap) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	cm.RLock()
+	defer cm.RUnlock()
+	now := time.Now()
+
+	for _, c := range cm.set[info.ServerName] {
+		if c.cert.Leaf.NotBefore.Before(now) &&
+			c.cert.Leaf.NotAfter.After(now) &&
+			info.SupportsCertificate(c.cert) != nil {
+			return c.cert, nil
+		}
+	}
+
+	name := strings.Split(info.ServerName, ".")
+	name[0] = "*"
+	wildcardName := strings.Join(name, ".")
+	for _, c := range cm.set[wildcardName] {
+		if c.cert.Leaf.NotBefore.Before(now) &&
+			c.cert.Leaf.NotAfter.After(now) &&
+			info.SupportsCertificate(c.cert) != nil {
+			return c.cert, nil
+		}
+	}
+
+	for _, c := range cm.set[info.ServerName] {
+		if info.SupportsCertificate(c.cert) != nil {
+			return c.cert, nil
+		}
+	}
+
+	for _, c := range cm.set[wildcardName] {
+		if info.SupportsCertificate(c.cert) != nil {
+			return c.cert, nil
+		}
+	}
+
+	return nil, nil
+}
 
 type secretKey struct {
 	namespace, name string

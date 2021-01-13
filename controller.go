@@ -81,6 +81,8 @@ type Controller struct {
 	svc  *svcUpdater // Service to ports/protocols mapping
 	eps  epsSet      // Service to endpoints mapping
 	secs *secUpdater // Secrets
+
+	certMap certMap
 }
 
 // Option for setting controller properties

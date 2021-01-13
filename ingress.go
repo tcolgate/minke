@@ -42,7 +42,7 @@ type ingress struct {
 type ingressRule struct {
 	host     string
 	re       *regexp.Regexp
-	pathType string
+	pathType *networkingv1beta1.PathType
 	prefix   string
 	backend  serviceKey
 }
@@ -181,6 +181,50 @@ func (is *ingressSet) getCertSecret(info *tls.ClientHelloInfo) (secretKey, error
 	return secretKey{}, nil
 }
 
+func (is *ingressSet) update(name, namespace string, newset map[string]ingressHostGroup) {
+	is.Lock()
+	defer is.Unlock()
+
+	if is.set == nil {
+		is.set = make(map[string]ingressHostGroup)
+	}
+
+	for n := range is.set {
+		var nings ingressHostGroup
+		for i := range is.set[n] {
+			if is.set[n][i].name == name &&
+				is.set[n][i].namespace == namespace {
+				continue
+			}
+			nings = append(nings, is.set[n][i])
+		}
+		is.set[n] = nings
+	}
+
+	for n := range newset {
+		hg := append(is.set[n], newset[n]...)
+		sort.Sort(ingressGroupByPriority(hg))
+		is.set[n] = hg
+	}
+}
+
+func (is *ingressSet) clear(name, namespace string) {
+	is.Lock()
+	defer is.Unlock()
+
+	for n := range is.set {
+		var nings ingressHostGroup
+		for i := range is.set[n] {
+			if is.set[n][i].name == name &&
+				is.set[n][i].namespace == namespace {
+				continue
+			}
+			nings = append(nings, is.set[n][i])
+		}
+		is.set[n] = nings
+	}
+}
+
 type ingUpdater struct {
 	c *Controller
 }
@@ -212,11 +256,11 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		return fmt.Errorf("interface was not an ingress %T", obj)
 	}
 
-	klog.Infof("ingress added, %s/%s", ing.GetNamespace(), ing.GetName())
-
 	if !u.c.ourClass(ing) {
 		return nil
 	}
+
+	klog.Infof("ingress added, %s/%s", ing.GetNamespace(), ing.GetName())
 
 	newset := make(map[string]ingressHostGroup)
 	for _, ingr := range ing.Spec.Rules {
@@ -248,7 +292,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 				prefix:   ingp.String(),
 				re:       re,
 				backend:  backendToServiceKey(ing.ObjectMeta.Namespace, &ingp.Backend),
-				pathType: ingr.HTTP.Paths[0].String(),
+				pathType: ingp.PathType,
 			}
 			ning.rules = append(ning.rules, nir)
 		}
@@ -256,30 +300,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		newset[ingr.Host] = append(old, ning)
 	}
 
-	u.c.ings.Lock()
-	defer u.c.ings.Unlock()
-
-	if u.c.ings.set == nil {
-		u.c.ings.set = make(map[string]ingressHostGroup)
-	}
-
-	for n := range u.c.ings.set {
-		var nings ingressHostGroup
-		for i := range u.c.ings.set[n] {
-			if u.c.ings.set[n][i].name == ing.ObjectMeta.Name &&
-				u.c.ings.set[n][i].namespace == ing.ObjectMeta.Namespace {
-				continue
-			}
-			nings = append(nings, u.c.ings.set[n][i])
-		}
-		u.c.ings.set[n] = nings
-	}
-
-	for n := range newset {
-		hg := append(u.c.ings.set[n], newset[n]...)
-		sort.Sort(ingressGroupByPriority(hg))
-		u.c.ings.set[n] = hg
-	}
+	u.c.ings.update(ing.ObjectMeta.Name, ing.ObjectMeta.Namespace, newset)
 
 	return nil
 }
@@ -292,20 +313,7 @@ func (u *ingUpdater) delItem(obj interface{}) error {
 
 	klog.Infof("ingress removed, %s/%s", ing.GetNamespace(), ing.GetName())
 
-	u.c.ings.Lock()
-	defer u.c.ings.Unlock()
-
-	for n := range u.c.ings.set {
-		var nings ingressHostGroup
-		for i := range u.c.ings.set[n] {
-			if u.c.ings.set[n][i].name == ing.ObjectMeta.Name &&
-				u.c.ings.set[n][i].namespace == ing.ObjectMeta.Namespace {
-				continue
-			}
-			nings = append(nings, u.c.ings.set[n][i])
-		}
-		u.c.ings.set[n] = nings
-	}
+	u.c.ings.clear(ing.ObjectMeta.Name, ing.ObjectMeta.Namespace)
 
 	return nil
 }
