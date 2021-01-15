@@ -244,8 +244,8 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		}).DialContext,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 10 * time.Second,
 		TLSClientConfig:       c.clientTLSConfig,
 	}
 
@@ -264,7 +264,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.Handler = &httputil.ReverseProxy{
 		Director:      c.director,
 		ErrorLog:      nil,
-		FlushInterval: 1 * time.Millisecond,
+		FlushInterval: 10 * time.Millisecond,
 		Transport:     c.transport,
 	}
 

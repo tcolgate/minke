@@ -51,6 +51,8 @@ func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 
+	klog.CopyStandardLogTo("ERROR")
+
 	stop := setupSignalHandler()
 
 	cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfig)
