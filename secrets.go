@@ -6,6 +6,7 @@ package minke
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"log"
 	"strings"
 	"sync"
@@ -21,15 +22,66 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type ingressKey struct {
+	namespace, name string
+}
+
+type secretKey struct {
+	namespace, name string
+}
+
 type certMapEntry struct {
+	sync.RWMutex
 	cert *tls.Certificate
 	sec  secretKey
+	ing  ingressKey
 }
 
 // a map of host names to certificates.
 type certMap struct {
 	sync.RWMutex
-	set map[string][]certMapEntry
+	set map[string][]*certMapEntry
+}
+
+func (cm *certMap) updateIngress(key ingressKey, newset map[string][]*certMapEntry) {
+	cm.Lock()
+	defer cm.Unlock()
+	if cm.set == nil {
+		cm.set = make(map[string][]*certMapEntry)
+	}
+	log.Printf("update certs with newset %#v", newset)
+	// filter out the old ones
+	for i := range cm.set {
+		n := 0
+		for _, cme := range cm.set[i] {
+			if cme.ing != key {
+				cm.set[i][n] = cme
+				n++
+			}
+		}
+		cm.set[i] = cm.set[i][:n]
+	}
+
+	for h, cmes := range newset {
+		cm.set[h] = append(cm.set[h], cmes...)
+	}
+}
+
+func (cm *certMap) updateSecret(key secretKey, cert *tls.Certificate) {
+	cm.RLock()
+	defer cm.RUnlock()
+
+	for _, cmes := range cm.set {
+		for _, cme := range cmes {
+			func() {
+				cme.Lock()
+				defer cme.Unlock()
+				if cme.sec == key {
+					cme.cert = cert
+				}
+			}()
+		}
+	}
 }
 
 // GetCertificate checks for non-expired acceptable matches, and then expired acceptable matches
@@ -39,10 +91,23 @@ func (cm *certMap) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, 
 	now := time.Now()
 
 	for _, c := range cm.set[info.ServerName] {
-		if c.cert.Leaf.NotBefore.Before(now) &&
-			c.cert.Leaf.NotAfter.After(now) &&
-			info.SupportsCertificate(c.cert) != nil {
-			return c.cert, nil
+		cert := func() *tls.Certificate {
+			c.RLock()
+			defer c.RUnlock()
+			err := info.SupportsCertificate(c.cert)
+			if err != nil {
+				log.Printf("unsupported cert %v", err)
+				return nil
+			}
+			if c.cert.Leaf.NotBefore.Before(now) &&
+				c.cert.Leaf.NotAfter.After(now) {
+				return c.cert
+			}
+			log.Print("out of time range")
+			return nil
+		}()
+		if cert != nil {
+			return cert, nil
 		}
 	}
 
@@ -72,10 +137,6 @@ func (cm *certMap) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, 
 	return nil, nil
 }
 
-type secretKey struct {
-	namespace, name string
-}
-
 type secUpdater struct {
 	c       *Controller
 	mu      sync.RWMutex
@@ -96,6 +157,12 @@ func (u *secUpdater) updateCert(key secretKey, sec map[string][]byte) *tls.Certi
 	newcert, err := tls.X509KeyPair(certBytes, keyBytes)
 	log.Printf("got cert %#v", newcert)
 	if err != nil {
+		log.Printf("keypair error, %v", err)
+		return nil
+	}
+	newcert.Leaf, err = x509.ParseCertificate(newcert.Certificate[0])
+	if err != nil {
+		log.Printf("parse leaf err, %v", err)
 		return nil
 	}
 	u.cacheMu.Lock()
@@ -117,7 +184,6 @@ func (u *secUpdater) getCert(key secretKey) *tls.Certificate {
 	}
 
 	sec := u.getSecret(key.namespace, key.name)
-	log.Printf("got secret %#v", sec)
 	return u.updateCert(key, sec)
 }
 
@@ -174,12 +240,20 @@ func (u *secUpdater) delItem(obj interface{}) error {
 
 func (u *secUpdater) getSecret(namespace, name string) map[string][]byte {
 	u.mu.RLock()
-	defer u.mu.RUnlock()
 	vs, ok := u.secrets[secretKey{namespace, name}]
-	if !ok {
-		log.Printf("no secret found for %v/%v", namespace, name)
+	u.mu.RUnlock()
+	if ok {
+		return vs
 	}
-	return vs
+
+	sec, err := u.c.secList.Secrets(namespace).Get(name)
+	if err != nil {
+		return nil
+	}
+
+	u.addItem(sec)
+
+	return sec.Data
 }
 
 func (c *Controller) setupSecretProcess(ctx context.Context) error {

@@ -2,7 +2,6 @@ package minke
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -158,29 +157,6 @@ func (is *ingressSet) getServiceKey(r *http.Request) (serviceKey, bool) {
 	return serviceKey{}, false
 }
 
-func (is *ingressSet) getCertSecret(info *tls.ClientHelloInfo) (secretKey, error) {
-	is.RLock()
-	defer is.RUnlock()
-
-	// TODO: gibberish, must pick cert properly
-	h := is.set[info.ServerName]
-	if len(h) != 0 {
-		return h[0].certKey, nil
-	}
-
-	if len(info.ServerName) > 0 {
-		name := strings.Split(info.ServerName, ".")
-		name[0] = "*"
-		wildcardName := strings.Join(name, ".")
-		h := is.set[wildcardName]
-		if len(h) > 0 {
-			return h[0].certKey, nil
-		}
-	}
-
-	return secretKey{}, nil
-}
-
 func (is *ingressSet) update(name, namespace string, newset map[string]ingressHostGroup) {
 	is.Lock()
 	defer is.Unlock()
@@ -262,6 +238,10 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 
 	klog.Infof("ingress added, %s/%s", ing.GetNamespace(), ing.GetName())
 
+	// we'll collate  alist of hosts incase the TLS list
+	// doesn't include one
+	var hosts []string
+
 	newset := make(map[string]ingressHostGroup)
 	for _, ingr := range ing.Spec.Rules {
 		ning := ingress{
@@ -298,6 +278,34 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		}
 		old, _ := newset[ingr.Host]
 		newset[ingr.Host] = append(old, ning)
+		if ingr.Host != "" {
+			hosts = append(hosts, ingr.Host)
+		}
+	}
+
+	for _, t := range ing.Spec.TLS {
+		var certHosts []string
+		if len(t.Hosts) == 0 {
+			certHosts = hosts
+		}
+
+		secKey := secretKey{namespace: ing.Namespace, name: t.SecretName}
+		ingKey := ingressKey{namespace: ing.Namespace, name: ing.Name}
+
+		cert := u.c.secs.getCert(secKey)
+
+		if cert != nil {
+			cmapEntry := &certMapEntry{
+				sec:  secKey,
+				ing:  ingKey,
+				cert: cert,
+			}
+			allcerts := make(map[string][]*certMapEntry, len(hosts))
+			for _, h := range certHosts {
+				allcerts[h] = [](*certMapEntry){cmapEntry}
+			}
+			u.c.certMap.updateIngress(ingKey, allcerts)
+		}
 	}
 
 	u.c.ings.update(ing.ObjectMeta.Name, ing.ObjectMeta.Namespace, newset)

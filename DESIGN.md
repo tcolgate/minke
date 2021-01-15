@@ -36,6 +36,9 @@ implementation details.
     for them are handled last.
   * Those of the same priority are sorted alphabetically by name then namespace
 - Ingresses with no HTTP Hostname set are sorted as above.
+- Certs are collated, the TLS entry for an ingress does not include any hosts, then the
+  hosts mention in the rules are gathered, and the cert is taken to cover only the hosts
+  mention in the rules it lives with.
 
 Incoming traffic is then processed as follows:
 
