@@ -96,7 +96,7 @@ func WithClass(cls string) Option {
 	}
 }
 
-// WithNamespaces is an option for setting the set of namespaces to watch
+// WithNamespace is an option for setting the set of namespaces to watch
 func WithNamespace(ns string) Option {
 	return func(c *Controller) error {
 		c.namespace = ns
@@ -219,6 +219,9 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 			return nil, err
 		}
 	}
+
+	// TODO(): verify that any default secrets are in the same namespace as any
+	// namespace, or the watch wont see them. (or stop using listwatch for secrets)
 
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(c.logFunc)
