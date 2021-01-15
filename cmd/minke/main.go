@@ -34,6 +34,7 @@ var (
 
 	namespace = flag.String("namespace", metav1.NamespaceAll, "namespace to watch resources")
 	selector  = flag.String("l", "", "label selector to match ingresses")
+	class     = flag.String("class", "minke", "ingress class to match")
 
 	adminAddr = flag.String("addr.admin", ":8080", "address to provide metrics")
 	httpAddr  = flag.String("addr.http", ":80", "address to serve http")
@@ -107,6 +108,7 @@ func main() {
 	ctrl, err := minke.New(
 		clientset,
 		minke.WithNamespace(*namespace),
+		minke.WithClass(*class),
 		minke.WithSelector(selector),
 		minke.WithDefaultTLSSecret(*serverTLSDefaultSecret),
 		minke.WithClientTLSConfig(tlsClientConfig),
