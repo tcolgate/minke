@@ -57,7 +57,6 @@ func (cm *certMap) updateIngress(key ingressKey, newset map[string][]*certMapEnt
 	if cm.set == nil {
 		cm.set = make(map[string][]*certMapEntry)
 	}
-	log.Printf("update certs with newset %#v", newset)
 	// filter out the old ones
 	for i := range cm.set {
 		n := 0
@@ -104,14 +103,12 @@ func (cm *certMap) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, 
 			defer c.RUnlock()
 			err := info.SupportsCertificate(c.cert)
 			if err != nil {
-				log.Printf("unsupported cert %v", err)
 				return nil
 			}
 			if c.cert.Leaf.NotBefore.Before(now) &&
 				c.cert.Leaf.NotAfter.After(now) {
 				return c.cert
 			}
-			log.Print("out of time range")
 			return nil
 		}()
 		if cert != nil {

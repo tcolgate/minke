@@ -3,7 +3,6 @@ package minke
 import (
 	"crypto/tls"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -23,7 +22,6 @@ func (t *httpTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	// as we've got a port int he URL, the scheme is ignored.
 	case "http2", "grpc":
 		r.URL.Scheme = "http"
-		log.Printf("r %#v", r)
 		return t.http2.RoundTrip(r)
 	default:
 		return t.base.RoundTrip(r)

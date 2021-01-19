@@ -41,13 +41,16 @@ type ingressGroupByPriority []ingress
 type pathType int
 
 const (
-	re2 pathType = iota
+	glob pathType = iota
 	prefix
 	exact
+	re2
 )
 
 func (pt pathType) String() string {
 	switch pt {
+	case glob:
+		return "glob"
 	case re2:
 		return "re2"
 	case prefix:
@@ -57,6 +60,10 @@ func (pt pathType) String() string {
 	default:
 		return fmt.Sprintf("(unknown:%v)", int(pt))
 	}
+}
+
+func (pt pathType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(pt.String())
 }
 
 // an ingress here includes the set of rules for an ingress
@@ -95,7 +102,13 @@ type ingressRule struct {
 
 func (ir ingressRule) MarshalJSON() ([]byte, error) {
 	strmap := map[string]interface{}{
-		"backend": ir.backend,
+		"backend":  ir.backend,
+		"path":     ir.path,
+		"pathType": ir.pathType,
+		"host":     ir.host,
+	}
+	if ir.host == "" {
+		strmap["host"] = "*"
 	}
 	return json.Marshal(strmap)
 }
@@ -145,7 +158,31 @@ func (g ingressGroupByPriority) Less(i, j int) bool {
 }
 
 func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
+	if ir.host != "" && ir.host != r.Host {
+		// This should /probably/ check if ir.host is a wildcard, but
+		// it's a little ambigious from the docs if they are supported here.
+		return 0, false
+	}
 	switch ir.pathType {
+	case glob:
+		if strings.HasSuffix(ir.path, "/*") {
+			subPath := ir.path[0 : len(ir.path)-2]
+			if subPath == "" {
+				subPath = "/"
+			}
+			if strings.HasPrefix(r.URL.Path, subPath) {
+				if len(r.URL.Path) == len(subPath) {
+					return len(subPath), false
+				}
+				if r.URL.Path[len(subPath)] == '/' {
+					return len(subPath) + 1, false
+				}
+			}
+		} else {
+			if r.URL.Path == ir.path {
+				return len(ir.path), false
+			}
+		}
 	case re2:
 		ms := ir.re.FindStringSubmatch(r.URL.Path)
 		if len(ms) != 0 {
@@ -156,6 +193,14 @@ func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
 			return len(ir.path), true
 		}
 	case prefix:
+		if strings.HasPrefix(r.URL.Path, ir.path) {
+			if len(r.URL.Path) == len(ir.path) {
+				return len(ir.path), false
+			}
+			if r.URL.Path[len(ir.path)] == '/' {
+				return len(ir.path) + 1, false
+			}
+		}
 	default:
 	}
 	return 0, false
@@ -172,9 +217,18 @@ func (ings ingressHostGroup) getServiceKey(r *http.Request) (serviceKey, bool) {
 		var matched serviceKey
 		var matchLen int
 		for _, rule := range ings[i].rules {
-			if l, ok := rule.matchRule(r); ok && l > matchLen {
+			l, exact := rule.matchRule(r)
+			if exact {
 				matched = rule.backend
 				matchLen = l
+				break
+			}
+			if l > matchLen {
+				matched = rule.backend
+				matchLen = l
+				if exact {
+					break
+				}
 			}
 		}
 
@@ -317,48 +371,60 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		}
 
 		for _, ingp := range ingr.HTTP.Paths {
-			path := "/"
-			if ingp.Path != "" {
-				path = ingp.Path
-			}
-
 			var re *regexp.Regexp
-			pathType := re2
+			var pathType pathType
+			path := ingp.Path
 
 			if ingp.PathType != nil {
 				switch *ingp.PathType {
 				case networkingv1beta1.PathTypePrefix:
+					if path == "" {
+						path = "/"
+					}
 					pathType = prefix
+					// prefix matching ignores trailing /
+					if len(path) > 1 && path[len(path)-1] == '/' {
+						path = path[0 : len(path)-1]
+					}
 				case networkingv1beta1.PathTypeExact:
 					pathType = exact
-				default:
+					if path == "" {
+						path = "/"
+					}
+				case "re2":
 					pathType = re2
+					if path == "" {
+						path = "/"
+					}
 					if !strings.HasPrefix(path, "^") {
 						path = "^" + path
 					}
 					var err error
 					re, err = regexp.CompilePOSIX(path)
 					if err != nil {
-						// TODO: log an error
+						// todo: log an error
 						continue
+					}
+				default:
+					pathType = glob
+					if path == "" {
+						path = "/*"
 					}
 				}
 			} else {
-				pathType = re2
-				if !strings.HasPrefix(path, "^") {
-					path = "^" + path
-				}
-				var err error
-				re, err = regexp.CompilePOSIX(path)
-				if err != nil {
-					// TODO: log an error
-					continue
+				if path == "" {
+					// If the user has not specified any paths or globs, we'll use our
+					// fastest wildcard match option
+					pathType = prefix
+					path = "/"
+				} else {
+					pathType = glob
 				}
 			}
 
 			nir := ingressRule{
 				host:     ingr.Host,
-				path:     ingp.String(),
+				path:     path,
 				re:       re,
 				backend:  backendToServiceKey(ing.ObjectMeta.Namespace, &ingp.Backend),
 				pathType: pathType,
