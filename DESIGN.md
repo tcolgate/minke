@@ -45,7 +45,13 @@ Incoming traffic is then processed as follows:
 - If a hostname matches, the set of Ingresses for that hostname as selected.
   - Ingresses are processed in the sorted order as specific above.
     - The rules for each ingress are process in the order from the specification
+      - Path types are as followsa:
+        - If unspecified GCLB glob matching is used
+        - Exact and Prefix are as per the ingress documentation
+        - ImplementationSpecific does an re2 match
       - If a match is found the matching ingress backend is selected.
+      - Only pathtype Exact rules are considered exact matches, in terms
+        of ingress rule processing semantics.
     - If no rules match, the set of ingresses is searched for a default
       backend. The first default backend is selected.
 - If no hostname matches or no backend was selected by the hostname rule sets, the

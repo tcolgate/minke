@@ -360,7 +360,8 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 	var hosts []string
 
 	newset := make(map[string]ingressHostGroup)
-	for _, ingr := range ing.Spec.Rules {
+	for i, ingr := range ing.Spec.Rules {
+		name := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ing.ObjectMeta.Name)
 		ning := ingress{
 			name:      ing.ObjectMeta.Name,
 			namespace: ing.ObjectMeta.Namespace,
@@ -370,7 +371,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 			ning.defaultBackend = &key
 		}
 
-		for _, ingp := range ingr.HTTP.Paths {
+		for j, ingp := range ingr.HTTP.Paths {
 			var re *regexp.Regexp
 			var pathType pathType
 			path := ingp.Path
@@ -391,7 +392,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 					if path == "" {
 						path = "/"
 					}
-				case "re2":
+				case networkingv1beta1.PathTypeImplementationSpecific, "re":
 					pathType = re2
 					if path == "" {
 						path = "/"
@@ -403,13 +404,17 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 					re, err = regexp.CompilePOSIX(path)
 					if err != nil {
 						// todo: log an error
+						klog.Errorf("ingress %s, ignoring path rules[%d].paths[%d] with invalid regexp , %v", name, i, j, err)
 						continue
 					}
-				default:
+				case "":
 					pathType = glob
 					if path == "" {
 						path = "/*"
 					}
+				default:
+					klog.Errorf("ingress %s, ignoring path rules[%d].paths[%d] with invalid PathType", name, i, j)
+					continue
 				}
 			} else {
 				if path == "" {
