@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ type secretKey struct {
 type certMapEntry struct {
 	sync.RWMutex
 	cert *tls.Certificate
+	raw  []byte
 	sec  secretKey
 	ing  ingressKey
 }
@@ -49,6 +51,26 @@ func (cm *certMap) MarshalJSON() ([]byte, error) {
 	cm.RLock()
 	defer cm.RUnlock()
 	return json.Marshal(cm.set)
+}
+
+func (cme *certMapEntry) MarshalJSON() ([]byte, error) {
+	cme.RLock()
+	defer cme.RUnlock()
+	strmap := map[string]interface{}{
+		"ingress":   fmt.Sprintf("%s/%s", cme.ing.namespace, cme.ing.name),
+		"secret":    fmt.Sprintf("%s/%s", cme.sec.namespace, cme.sec.name),
+		"notBefore": cme.cert.Leaf.NotBefore,
+		"notAfter":  cme.cert.Leaf.NotAfter,
+		"issuer":    cme.cert.Leaf.Issuer.String(),
+		"subject":   cme.cert.Leaf.Subject.String(),
+	}
+	if len(cme.cert.Leaf.DNSNames) > 0 {
+		strmap["dnsName"] = cme.cert.Leaf.DNSNames
+	}
+	if len(cme.cert.Leaf.IPAddresses) > 0 {
+		strmap["ipAddresses"] = cme.cert.Leaf.IPAddresses
+	}
+	return json.Marshal(strmap)
 }
 
 func (cm *certMap) updateIngress(key ingressKey, newset map[string][]*certMapEntry) {
