@@ -2,11 +2,14 @@ package minke
 
 import (
 	"crypto/tls"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
+
+	"k8s.io/klog"
 )
 
 type httpTransport struct {
@@ -27,12 +30,32 @@ func (t *httpTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 }
 
+type httpError struct {
+	status     int
+	logMessage string
+}
+
+func (c *Controller) handler(w http.ResponseWriter, req *http.Request) {
+	defer func() {
+		if err := recover(); err != nil {
+			switch err := err.(type) {
+			case httpError:
+				klog.Errorf("proxy: %v", err.logMessage)
+				w.WriteHeader(err.status)
+				return
+			}
+			klog.Errorf("proxy: %v", err)
+		}
+	}()
+	c.proxy.ServeHTTP(w, req)
+}
+
 func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 	var ok bool
 
 	key, ok := c.ings.getServiceKey(req)
 	if !ok {
-		return serviceAddr{}, ""
+		panic(httpError{status: http.StatusNotFound, logMessage: "no service for thing"})
 	}
 
 	port := c.svc.getServicePortScheme(key)
@@ -48,11 +71,14 @@ func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 		return eps[rand.Intn(len(eps)-1)], port
 	}
 
-	return serviceAddr{}, port
+	panic(httpError{
+		status:     http.StatusBadGateway,
+		logMessage: fmt.Sprintf("no active endpoints for %v", key)})
 }
 
 func (c *Controller) director(req *http.Request) {
 	target, scheme := c.getTarget(req)
+
 	req.URL.Host = net.JoinHostPort(target.addr, strconv.Itoa(target.port))
 	req.URL.Scheme = scheme
 

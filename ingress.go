@@ -2,6 +2,7 @@ package minke
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -20,15 +21,33 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+// ingressSet maps hostnames to the ingresses that use them.
 type ingressSet struct {
 	sync.RWMutex
 	set map[string]ingressHostGroup
+}
+
+// MarshalJSON lets us report the status of the ingress set
+func (is *ingressSet) MarshalJSON() ([]byte, error) {
+	is.RLock()
+	defer is.RUnlock()
+	return json.Marshal(is.set)
 }
 
 type ingressHostGroup []ingress
 
 type ingressGroupByPriority []ingress
 
+type pathType int
+
+const (
+	re2 pathType = iota
+	prefix
+	exact
+)
+
+// an ingress here includes the set of rules for an ingress
+// that match a specific host.
 type ingress struct {
 	name           string
 	namespace      string
@@ -38,11 +57,13 @@ type ingress struct {
 	certKey        secretKey
 }
 
+// ingress rules is one specific path, and the backend it
+// maps to.
 type ingressRule struct {
 	host     string
 	re       *regexp.Regexp
-	pathType *networkingv1beta1.PathType
-	prefix   string
+	pathType pathType
+	path     string
 	backend  serviceKey
 }
 
@@ -91,11 +112,20 @@ func (g ingressGroupByPriority) Less(i, j int) bool {
 }
 
 func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
-	ms := ir.re.FindStringSubmatch(r.URL.Path)
-	if len(ms) == 0 {
-		return 0, false
+	switch ir.pathType {
+	case re2:
+		ms := ir.re.FindStringSubmatch(r.URL.Path)
+		if len(ms) != 0 {
+			return len(ms[0]), false
+		}
+	case exact:
+		if r.URL.Path == ir.path {
+			return len(ir.path), true
+		}
+	case prefix:
+	default:
 	}
-	return len(ms[0]), true
+	return 0, false
 }
 
 func (ings ingressHostGroup) getServiceKey(r *http.Request) (serviceKey, bool) {
@@ -254,25 +284,51 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		}
 
 		for _, ingp := range ingr.HTTP.Paths {
-			path := "^/.*"
+			path := "/"
 			if ingp.Path != "" {
-				if ingp.Path[0] != '/' {
+				path = ingp.Path
+			}
+
+			var re *regexp.Regexp
+			pathType := re2
+
+			if ingp.PathType != nil {
+				switch *ingp.PathType {
+				case networkingv1beta1.PathTypePrefix:
+					pathType = prefix
+				case networkingv1beta1.PathTypeExact:
+					pathType = exact
+				default:
+					pathType = re2
+					if !strings.HasPrefix(path, "^") {
+						path = "^" + path
+					}
+					var err error
+					re, err = regexp.CompilePOSIX(path)
+					if err != nil {
+						// TODO: log an error
+						continue
+					}
+				}
+			} else {
+				pathType = re2
+				if !strings.HasPrefix(path, "^") {
+					path = "^" + path
+				}
+				var err error
+				re, err = regexp.CompilePOSIX(path)
+				if err != nil {
 					// TODO: log an error
 					continue
 				}
-				path = "^" + ingp.Path
 			}
-			re, err := regexp.CompilePOSIX(path)
-			if err != nil {
-				// TODO: log an error
-				continue
-			}
+
 			nir := ingressRule{
 				host:     ingr.Host,
-				prefix:   ingp.String(),
+				path:     ingp.String(),
 				re:       re,
 				backend:  backendToServiceKey(ing.ObjectMeta.Namespace, &ingp.Backend),
-				pathType: ingp.PathType,
+				pathType: pathType,
 			}
 			ning.rules = append(ning.rules, nir)
 		}

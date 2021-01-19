@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"log"
 	"strings"
 	"sync"
@@ -41,6 +42,13 @@ type certMapEntry struct {
 type certMap struct {
 	sync.RWMutex
 	set map[string][]*certMapEntry
+}
+
+// MarshalJSON lets us report the status of the certificate mapping
+func (cm *certMap) MarshalJSON() ([]byte, error) {
+	cm.RLock()
+	defer cm.RUnlock()
+	return json.Marshal(cm.set)
 }
 
 func (cm *certMap) updateIngress(key ingressKey, newset map[string][]*certMapEntry) {
@@ -155,7 +163,6 @@ func (u *secUpdater) updateCert(key secretKey, sec map[string][]byte) *tls.Certi
 	}
 
 	newcert, err := tls.X509KeyPair(certBytes, keyBytes)
-	log.Printf("got cert %#v", newcert)
 	if err != nil {
 		log.Printf("keypair error, %v", err)
 		return nil

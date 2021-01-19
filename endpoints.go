@@ -2,6 +2,7 @@ package minke
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -21,14 +22,32 @@ type serviceKey struct {
 	portName  string
 }
 
+func (sk *serviceKey) MarshalJSON() ([]byte, error) {
+	if sk.portName == "" {
+		return json.Marshal(fmt.Sprintf("%s/%s", sk.namespace, sk.namespace))
+	}
+	return json.Marshal(fmt.Sprintf("%s/%s:%s", sk.namespace, sk.namespace, sk.portName))
+}
+
 type serviceAddr struct {
 	addr string
 	port int
 }
 
+func (sa *serviceAddr) MarshalJSON() ([]byte, error) {
+	return json.Marshal(fmt.Sprintf("%s:%v", sa.addr, sa.port))
+}
+
 type epsSet struct {
 	set map[serviceKey][]serviceAddr
 	sync.RWMutex
+}
+
+// MarshalJSON lets us report the status of the certificate mapping
+func (eps *epsSet) MarshalJSON() ([]byte, error) {
+	eps.RLock()
+	defer eps.RUnlock()
+	return json.Marshal(eps.set)
 }
 
 func backendToServiceKey(namespace string, b *networkingv1beta1.IngressBackend) serviceKey {

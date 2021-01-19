@@ -1,9 +1,12 @@
 package minke
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -19,6 +22,7 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/klog"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -72,17 +76,19 @@ type Controller struct {
 	stopping bool
 
 	transport http.RoundTripper
+
+	proxy *httputil.ReverseProxy
 	http.Handler
 
 	metrics MetricsProvider
 	tracer  trace.Tracer
 
-	ings ingressSet  // Hostnames to ingress mapping and certs
+	ings *ingressSet // Hostnames to ingress mapping and certs
 	svc  *svcUpdater // Service to ports/protocols mapping
-	eps  epsSet      // Service to endpoints mapping
+	eps  *epsSet     // Service to endpoints mapping
 	secs *secUpdater // Secrets
 
-	certMap certMap
+	certMap *certMap
 }
 
 // Option for setting controller properties
@@ -113,6 +119,8 @@ func WithSelector(s labels.Selector) Option {
 	}
 }
 
+// WithDefaultBackend sets the backend to be used as defaultBackend when none
+// is specified
 func WithDefaultBackend(str string) Option {
 	return func(c *Controller) error {
 		parts := strings.SplitN(str, "/", 2)
@@ -211,7 +219,9 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		metrics:         metricsProvider,
 		tracer:          otel.Tracer("minke"),
 		clientTLSConfig: &tls.Config{},
-		eps:             epsSet{set: make(map[serviceKey][]serviceAddr)},
+		certMap:         &certMap{},
+		ings:            &ingressSet{},
+		eps:             &epsSet{set: make(map[serviceKey][]serviceAddr)},
 	}
 
 	for _, opt := range opts {
@@ -264,12 +274,14 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		http2: transport2,
 	}
 
-	c.Handler = &httputil.ReverseProxy{
+	c.proxy = &httputil.ReverseProxy{
 		Director:      c.director,
-		ErrorLog:      nil,
 		FlushInterval: 10 * time.Millisecond,
 		Transport:     c.transport,
+		ErrorHandler:  c.errorHandler,
 	}
+
+	c.Handler = http.HandlerFunc(c.handler)
 
 	if c.metrics != nil {
 		c.Handler = c.metrics.NewHTTPServerMetrics(c.Handler)
@@ -334,4 +346,29 @@ func (c *Controller) ServeReadyzHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "OK", http.StatusOK)
+}
+
+// MarshalJSON lets us report the status of the controller
+func (c *Controller) MarshalJSON() ([]byte, error) {
+	status := map[string]interface{}{
+		"ingresses": c.ings,
+		"certs":     c.certMap,
+		"endpoints": c.eps,
+	}
+	return json.Marshal(status)
+}
+
+func (c *Controller) ServeStatusHTTP(w http.ResponseWriter, r *http.Request) {
+	bs, err := json.Marshal(c)
+	if err != nil {
+		klog.Errorf(`error serving status, %v`, err)
+		http.Error(w, `{"error": "status failed, see logs"}`, http.StatusOK)
+		return
+	}
+	io.Copy(w, bytes.NewBuffer(bs))
+}
+
+func (c *Controller) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	klog.Infof("proxy: %#v", err)
+	w.WriteHeader(http.StatusBadGateway)
 }

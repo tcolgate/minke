@@ -123,6 +123,7 @@ func main() {
 
 	adminMux.Handle("/livez", http.HandlerFunc(ctrl.ServeLivezHTTP))
 	adminMux.Handle("/readyz", http.HandlerFunc(ctrl.ServeReadyzHTTP))
+	adminMux.Handle("/status", http.HandlerFunc(ctrl.ServeStatusHTTP))
 	adminMux.HandleFunc("/debug/pprof/", pprof.Index)
 	adminMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	adminMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
