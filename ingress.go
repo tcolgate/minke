@@ -46,6 +46,19 @@ const (
 	exact
 )
 
+func (pt pathType) String() string {
+	switch pt {
+	case re2:
+		return "re2"
+	case prefix:
+		return "prefix"
+	case exact:
+		return "exact"
+	default:
+		return fmt.Sprintf("(unknown:%v)", int(pt))
+	}
+}
+
 // an ingress here includes the set of rules for an ingress
 // that match a specific host.
 type ingress struct {
@@ -54,7 +67,20 @@ type ingress struct {
 	priority       *int
 	defaultBackend *serviceKey
 	rules          []ingressRule
-	certKey        secretKey
+}
+
+func (ing ingress) MarshalJSON() ([]byte, error) {
+	strmap := map[string]interface{}{
+		"ingress": fmt.Sprintf("%s/%s", ing.namespace, ing.name),
+		"rules":   ing.rules,
+	}
+	if ing.defaultBackend != nil {
+		strmap["defaultBackend"] = *ing.defaultBackend
+	}
+	if ing.priority != nil {
+		strmap["priority"] = *ing.priority
+	}
+	return json.Marshal(strmap)
 }
 
 // ingress rules is one specific path, and the backend it
@@ -65,6 +91,13 @@ type ingressRule struct {
 	pathType pathType
 	path     string
 	backend  serviceKey
+}
+
+func (ir ingressRule) MarshalJSON() ([]byte, error) {
+	strmap := map[string]interface{}{
+		"backend": ir.backend,
+	}
+	return json.Marshal(strmap)
 }
 
 func (g ingressGroupByPriority) Len() int {

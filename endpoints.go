@@ -22,11 +22,15 @@ type serviceKey struct {
 	portName  string
 }
 
-func (sk *serviceKey) MarshalJSON() ([]byte, error) {
+func (sk serviceKey) String() string {
 	if sk.portName == "" {
-		return json.Marshal(fmt.Sprintf("%s/%s", sk.namespace, sk.namespace))
+		return fmt.Sprintf("%s/%s", sk.namespace, sk.name)
 	}
-	return json.Marshal(fmt.Sprintf("%s/%s:%s", sk.namespace, sk.namespace, sk.portName))
+	return fmt.Sprintf("%s/%s:%s", sk.namespace, sk.name, sk.portName)
+}
+
+func (sk serviceKey) MarshalJSON() ([]byte, error) {
+	return json.Marshal(sk.String())
 }
 
 type serviceAddr struct {
@@ -34,8 +38,15 @@ type serviceAddr struct {
 	port int
 }
 
-func (sa *serviceAddr) MarshalJSON() ([]byte, error) {
-	return json.Marshal(fmt.Sprintf("%s:%v", sa.addr, sa.port))
+func (sa serviceAddr) String() string {
+	if sa.port != 0 {
+		return fmt.Sprintf("%s:%v", sa.addr, sa.port)
+	}
+	return fmt.Sprintf("%s", sa.addr)
+}
+
+func (sa serviceAddr) MarshalJSON() ([]byte, error) {
+	return json.Marshal(sa.String())
 }
 
 type epsSet struct {
@@ -47,7 +58,14 @@ type epsSet struct {
 func (eps *epsSet) MarshalJSON() ([]byte, error) {
 	eps.RLock()
 	defer eps.RUnlock()
-	return json.Marshal(eps.set)
+	strmap := map[string][]string{}
+	for k, vs := range eps.set {
+		kstr := k.String()
+		for _, v := range vs {
+			strmap[kstr] = append(strmap[kstr], v.String())
+		}
+	}
+	return json.Marshal(strmap)
 }
 
 func backendToServiceKey(namespace string, b *networkingv1beta1.IngressBackend) serviceKey {
