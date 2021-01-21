@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -183,12 +182,12 @@ func (u *secUpdater) updateCert(key secretKey, sec map[string][]byte) *tls.Certi
 
 	newcert, err := tls.X509KeyPair(certBytes, keyBytes)
 	if err != nil {
-		log.Printf("keypair error, %v", err)
+		klog.Errorf("keypair error for %s, %v", key, err)
 		return nil
 	}
 	newcert.Leaf, err = x509.ParseCertificate(newcert.Certificate[0])
 	if err != nil {
-		log.Printf("parse leaf err, %v", err)
+		klog.Errorf("parse leaf error for %s, %v", key, err)
 		return nil
 	}
 	u.cacheMu.Lock()
