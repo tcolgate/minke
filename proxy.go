@@ -33,10 +33,16 @@ type httpError struct {
 	logMessage string
 }
 
+type httpRedirect struct {
+	destination string
+}
+
 func (c *Controller) handler(w http.ResponseWriter, req *http.Request) {
 	defer func() {
 		if err := recover(); err != nil {
 			switch err := err.(type) {
+			case httpRedirect:
+				http.Redirect(w, req, err.destination, http.StatusMovedPermanently)
 			case httpError:
 				klog.Errorf("proxy: %v", err.logMessage)
 				w.WriteHeader(err.status)
@@ -49,16 +55,19 @@ func (c *Controller) handler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
-	var ok bool
-
-	key, ok := c.ings.getServiceKey(req)
-	if !ok {
+	ing, rule := c.ings.matchRule(req)
+	if ing == nil {
 		panic(httpError{status: http.StatusNotFound, logMessage: "no service for thing"})
 	}
 
-	port := c.svc.getServicePortScheme(key)
+	if ing.httpRedir && req.TLS == nil {
+		req.URL.Scheme = "https"
+		panic(httpRedirect{destination: req.URL.String()})
+	}
 
-	eps := c.eps.getActiveAddrs(key)
+	port := c.svc.getServicePortScheme(rule.backend)
+
+	eps := c.eps.getActiveAddrs(rule.backend)
 
 	if len(eps) == 1 {
 		return eps[0], port
@@ -71,7 +80,7 @@ func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 
 	panic(httpError{
 		status:     http.StatusBadGateway,
-		logMessage: fmt.Sprintf("no active endpoints for %v", key)})
+		logMessage: fmt.Sprintf("no active endpoints for %v", rule.backend)})
 }
 
 func (c *Controller) director(req *http.Request) {

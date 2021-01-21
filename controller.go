@@ -44,6 +44,8 @@ type Controller struct {
 	logFunc       func(string, ...interface{})
 	accessLogFunc func(string, ...interface{})
 
+	defaultHTTPRedir bool
+
 	defaultBackendNamespace string
 	defaultBackendName      string
 

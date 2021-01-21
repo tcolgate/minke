@@ -74,12 +74,14 @@ type ingress struct {
 	priority       *int
 	defaultBackend *serviceKey
 	rules          []ingressRule
+	httpRedir      bool
 }
 
 func (ing ingress) MarshalJSON() ([]byte, error) {
 	strmap := map[string]interface{}{
-		"ingress": fmt.Sprintf("%s/%s", ing.namespace, ing.name),
-		"rules":   ing.rules,
+		"ingress":   fmt.Sprintf("%s/%s", ing.namespace, ing.name),
+		"rules":     ing.rules,
+		"httpRedir": ing.httpRedir,
 	}
 	if ing.defaultBackend != nil {
 		strmap["defaultBackend"] = *ing.defaultBackend
@@ -171,7 +173,7 @@ func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
 				subPath = "/"
 			}
 			if strings.HasPrefix(r.URL.Path, subPath) {
-				if len(r.URL.Path) == len(subPath) {
+				if subPath == "/" || len(r.URL.Path) == len(subPath) {
 					return len(subPath), false
 				}
 				if r.URL.Path[len(subPath)] == '/' {
@@ -181,6 +183,9 @@ func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
 		} else {
 			if r.URL.Path == ir.path {
 				return len(ir.path), false
+			}
+			if r.URL.Path == ir.path+"/" {
+				return len(ir.path) + 1, false
 			}
 		}
 	case re2:
@@ -194,7 +199,7 @@ func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
 		}
 	case prefix:
 		if strings.HasPrefix(r.URL.Path, ir.path) {
-			if len(r.URL.Path) == len(ir.path) {
+			if ir.path == "/" || len(r.URL.Path) == len(ir.path) {
 				return len(ir.path), false
 			}
 			if r.URL.Path[len(ir.path)] == '/' {
@@ -206,54 +211,43 @@ func (ir *ingressRule) matchRule(r *http.Request) (int, bool) {
 	return 0, false
 }
 
-func (ings ingressHostGroup) getServiceKey(r *http.Request) (serviceKey, bool) {
-	var defBackend *serviceKey
-
+func (ings ingressHostGroup) matchRule(r *http.Request) (*ingress, *ingressRule) {
+	var ing *ingress
+	var matched *ingressRule
 	for i := range ings {
-		if defBackend != nil {
-			defBackend = ings[i].defaultBackend
-		}
-
-		var matched serviceKey
 		var matchLen int
-		for _, rule := range ings[i].rules {
+		for j, rule := range ings[i].rules {
 			l, exact := rule.matchRule(r)
-			if exact {
-				matched = rule.backend
-				matchLen = l
-				break
-			}
 			if l > matchLen {
-				matched = rule.backend
+				ing = &ings[i]
+				matched = &ings[i].rules[j]
 				matchLen = l
-				if exact {
-					break
-				}
+			}
+			if l == matchLen && exact {
+				ing = &ings[i]
+				matched = &ings[i].rules[j]
 			}
 		}
-
-		if matched.name != "" {
-			return matched, true
+		if ing != nil {
+			return ing, matched
 		}
 	}
-	if defBackend != nil {
-		return *defBackend, true
-	}
-
-	return serviceKey{}, false
+	return ing, matched
 }
 
-func (is *ingressSet) getServiceKey(r *http.Request) (serviceKey, bool) {
+func (is *ingressSet) matchRule(r *http.Request) (*ingress, *ingressRule) {
 	is.RLock()
 	defer is.RUnlock()
 
 	if is == nil {
-		return serviceKey{}, false
+		return nil, nil
 	}
 
 	ings, _ := is.set[r.Host]
-	if key, ok := ings.getServiceKey(r); ok {
-		return key, ok
+
+	ing, rule := ings.matchRule(r)
+	if ing != nil {
+		return ing, rule
 	}
 
 	if len(r.Host) > 0 {
@@ -261,17 +255,14 @@ func (is *ingressSet) getServiceKey(r *http.Request) (serviceKey, bool) {
 		name[0] = "*"
 		wildcardName := strings.Join(name, ".")
 		ings, _ := is.set[wildcardName]
-		if key, ok := ings.getServiceKey(r); ok {
-			return key, ok
+		ing, rule = ings.matchRule(r)
+		if ing != nil {
+			return ing, rule
 		}
 	}
 
 	ings, _ = is.set[""]
-	if key, ok := ings.getServiceKey(r); ok {
-		return key, ok
-	}
-
-	return serviceKey{}, false
+	return ings.matchRule(r)
 }
 
 func (is *ingressSet) update(name, namespace string, newset map[string]ingressHostGroup) {
