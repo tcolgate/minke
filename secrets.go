@@ -37,6 +37,7 @@ type certMapEntry struct {
 	raw  []byte
 	sec  secretKey
 	ing  ingressKey
+	err  error
 }
 
 // a map of host names to certificates.
@@ -62,23 +63,42 @@ func (cme *certMapEntry) MarshalJSON() ([]byte, error) {
 	cme.RLock()
 	defer cme.RUnlock()
 	strmap := map[string]interface{}{
-		"ingress":   fmt.Sprintf("%s/%s", cme.ing.namespace, cme.ing.name),
-		"secret":    fmt.Sprintf("%s/%s", cme.sec.namespace, cme.sec.name),
-		"notBefore": cme.cert.Leaf.NotBefore,
-		"notAfter":  cme.cert.Leaf.NotAfter,
-		"issuer":    cme.cert.Leaf.Issuer.String(),
-		"subject":   cme.cert.Leaf.Subject.String(),
+		"ingress": fmt.Sprintf("%s/%s", cme.ing.namespace, cme.ing.name),
+		"secret":  fmt.Sprintf("%s/%s", cme.sec.namespace, cme.sec.name),
 	}
-	if len(cme.cert.Leaf.DNSNames) > 0 {
-		strmap["dnsName"] = cme.cert.Leaf.DNSNames
+
+	if cme.cert != nil {
+		strmap["notBefore"] = cme.cert.Leaf.NotBefore
+		strmap["notAfter"] = cme.cert.Leaf.NotAfter
+		strmap["issuer"] = cme.cert.Leaf.Issuer.String()
+		strmap["subject"] = cme.cert.Leaf.Subject.String()
+		if len(cme.cert.Leaf.DNSNames) > 0 {
+			strmap["dnsName"] = cme.cert.Leaf.DNSNames
+		}
+		if len(cme.cert.Leaf.IPAddresses) > 0 {
+			strmap["ipAddresses"] = cme.cert.Leaf.IPAddresses
+		}
 	}
-	if len(cme.cert.Leaf.IPAddresses) > 0 {
-		strmap["ipAddresses"] = cme.cert.Leaf.IPAddresses
+	if cme.err != nil {
+		strmap["error"] = cme.err
 	}
+
 	return json.Marshal(strmap)
 }
 
-func (cm *certMap) updateIngress(key ingressKey, newset map[string][]*certMapEntry) {
+func (cm *certMap) updateIngress(key ingressKey, sec secretKey, hosts []string) {
+	cert, err := cm.secs.getCert(sec)
+	cmapEntry := &certMapEntry{
+		sec:  sec,
+		ing:  key,
+		cert: cert,
+		err:  err,
+	}
+	newset := make(map[string][]*certMapEntry, len(hosts))
+	for _, h := range hosts {
+		newset[h] = [](*certMapEntry){cmapEntry}
+	}
+
 	cm.Lock()
 	defer cm.Unlock()
 	if cm.set == nil {
@@ -101,7 +121,7 @@ func (cm *certMap) updateIngress(key ingressKey, newset map[string][]*certMapEnt
 	}
 }
 
-func (cm *certMap) updateSecret(key secretKey, cert *tls.Certificate) {
+func (cm *certMap) updateSecret(key secretKey, cert *tls.Certificate, err error) {
 	cm.RLock()
 	defer cm.RUnlock()
 
@@ -131,10 +151,11 @@ func (cm *certMap) updateSecret(key secretKey, cert *tls.Certificate) {
 func (cm *certMap) setDefaults(keys []secretKey) {
 	var certs []*certMapEntry
 	for _, key := range keys {
-		cert := cm.secs.getCert(key)
+		cert, err := cm.secs.getCert(key)
 		certs = append(certs, &certMapEntry{
 			sec:  key,
 			cert: cert,
+			err:  err,
 		})
 	}
 
@@ -248,49 +269,12 @@ type secUpdater struct {
 	c       *Controller
 	mu      sync.RWMutex
 	secrets map[secretKey]map[string][]byte
-
-	cacheMu sync.RWMutex
-	certs   map[secretKey]*tls.Certificate
+	certMap *certMap
 }
 
-func (u *secUpdater) updateCert(key secretKey, sec map[string][]byte) *tls.Certificate {
-	certBytes := sec[`tls.crt`]
-	keyBytes := sec[`tls.key`]
-	if len(certBytes) == 0 || len(keyBytes) == 0 {
-		// key or cert not specified
-		return nil
-	}
-
-	newcert, err := tls.X509KeyPair(certBytes, keyBytes)
-	if err != nil {
-		klog.Errorf("keypair error for %s, %v", key, err)
-		return nil
-	}
-	newcert.Leaf, err = x509.ParseCertificate(newcert.Certificate[0])
-	if err != nil {
-		klog.Errorf("parse leaf error for %s, %v", key, err)
-		return nil
-	}
-	u.cacheMu.Lock()
-	if u.certs == nil {
-		u.certs = make(map[secretKey]*tls.Certificate)
-	}
-	u.certs[key] = &newcert
-	u.cacheMu.Unlock()
-
-	return &newcert
-}
-
-func (u *secUpdater) getCert(key secretKey) *tls.Certificate {
-	u.cacheMu.RLock()
-	cert, ok := u.certs[key]
-	u.cacheMu.RUnlock()
-	if ok {
-		return cert
-	}
-
-	sec := u.getSecret(key.namespace, key.name)
-	return u.updateCert(key, sec)
+func (u *secUpdater) updateCert(key secretKey) {
+	sec, err := u.getCert(key)
+	u.certMap.updateSecret(key, sec, err)
 }
 
 func (u *secUpdater) addItem(obj interface{}) error {
@@ -311,18 +295,11 @@ func (u *secUpdater) addItem(obj interface{}) error {
 
 	key := secretKey{sobj.Namespace, sobj.Name}
 	u.mu.Lock()
-	klog.Infof("secret added, %s/%s", sobj.GetNamespace(), sobj.GetName())
+	klog.Infof("secret %s/%s updated", sobj.GetNamespace(), sobj.GetName())
 	u.secrets[key] = sobj.Data
 	u.mu.Unlock()
 
-	// if the cert is already present, we'll update it
-	u.cacheMu.RLock()
-	_, ok = u.certs[key]
-	u.cacheMu.RUnlock()
-
-	if ok {
-		u.updateCert(key, sobj.Data)
-	}
+	u.updateCert(key)
 
 	return nil
 }
@@ -333,14 +310,11 @@ func (u *secUpdater) delItem(obj interface{}) error {
 		return nil
 	}
 
-	u.cacheMu.Lock()
-	defer u.cacheMu.Unlock()
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	klog.Infof("secret deleted, %s/%s", sobj.GetNamespace(), sobj.GetName())
 	delete(u.secrets, secretKey{sobj.Namespace, sobj.Name})
-	delete(u.certs, secretKey{sobj.Namespace, sobj.Name})
 	return nil
 }
 
@@ -360,6 +334,33 @@ func (u *secUpdater) getSecret(namespace, name string) map[string][]byte {
 	u.addItem(sec)
 
 	return sec.Data
+}
+
+func (u *secUpdater) getCert(key secretKey) (*tls.Certificate, error) {
+	sec := u.getSecret(key.namespace, key.name)
+	certBytes := sec[`tls.crt`]
+	if len(certBytes) == 0 {
+		// key or cert not specified
+		return nil, fmt.Errorf("no tls.crt in secret")
+	}
+
+	keyBytes := sec[`tls.key`]
+	if len(keyBytes) == 0 {
+		return nil, fmt.Errorf("no tls.key in secret")
+	}
+
+	newcert, err := tls.X509KeyPair(certBytes, keyBytes)
+	if err != nil {
+		klog.Errorf("keypair error for %s, %v", key, err)
+		return nil, err
+	}
+	newcert.Leaf, err = x509.ParseCertificate(newcert.Certificate[0])
+	if err != nil {
+		klog.Errorf("parse leaf error for %s, %v", key, err)
+		return nil, err
+	}
+
+	return &newcert, nil
 }
 
 func (c *Controller) setupSecretProcess(ctx context.Context) error {
@@ -384,7 +385,9 @@ func (c *Controller) setupSecretProcess(ctx context.Context) error {
 
 	c.secList = listcorev1.NewSecretLister(c.secProc.informer.GetIndexer())
 	c.secs = upd
+	// TODO remove circular depedency, merge certmap and secUpdater
 	c.certMap = &certMap{secs: upd}
+	c.secs.certMap = c.certMap
 
 	return nil
 }

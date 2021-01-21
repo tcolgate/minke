@@ -457,20 +457,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		secKey := secretKey{namespace: ing.Namespace, name: t.SecretName}
 		ingKey := ingressKey{namespace: ing.Namespace, name: ing.Name}
 
-		cert := u.c.secs.getCert(secKey)
-
-		if cert != nil {
-			cmapEntry := &certMapEntry{
-				sec:  secKey,
-				ing:  ingKey,
-				cert: cert,
-			}
-			allcerts := make(map[string][]*certMapEntry, len(hosts))
-			for _, h := range certHosts {
-				allcerts[h] = [](*certMapEntry){cmapEntry}
-			}
-			u.c.certMap.updateIngress(ingKey, allcerts)
-		}
+		u.c.certMap.updateIngress(ingKey, secKey, certHosts)
 	}
 
 	u.c.ings.update(ing.ObjectMeta.Name, ing.ObjectMeta.Namespace, newset)
