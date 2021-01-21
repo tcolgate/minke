@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,7 +41,9 @@ var (
 	httpAddr  = flag.String("addr.http", ":80", "address to serve http")
 	httpsAddr = flag.String("addr.https", ":443", "address to server http/http2/quic")
 
-	serverTLSDefaultSecret  = flag.String("tls.server.default.secret", "", "the NAMESPACE/NAME of the default TLS secret ")
+	httpRedir = flag.Bool("http.redirect-https", true, "What should the default http redirect bahviour be")
+
+	serverTLSDefaultSecrets = flag.String("tls.server.default.secrets", "", "comma separated list of the NAMESPACE/NAME of the default TLS secrets")
 	serverTLSClientCASecret = flag.String("tls.server.clientca.secret", "", "")
 
 	clientTLSSecret = flag.String("tls.client.secret", "", "location cert to present for https client")
@@ -107,12 +110,18 @@ func main() {
 		CipherSuites:             ciphers,
 	}
 
+	var defaultSecrets []string
+	for _, str := range strings.Split(*serverTLSDefaultSecrets, ",") {
+		defaultSecrets = append(defaultSecrets, strings.TrimSpace(str))
+	}
+
 	ctrl, err := minke.New(
 		clientset,
 		minke.WithNamespace(*namespace),
 		minke.WithClass(*class),
 		minke.WithSelector(selector),
-		minke.WithDefaultTLSSecret(*serverTLSDefaultSecret),
+		minke.WithDefaultHTTPRedirect(*httpRedir),
+		minke.WithDefaultTLSSecrets(defaultSecrets...),
 		minke.WithClientTLSConfig(tlsClientConfig),
 		minke.WithClientTLSSecret(*clientTLSSecret),
 	)

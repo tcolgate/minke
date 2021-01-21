@@ -62,6 +62,7 @@ func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 
 	if ing.httpRedir && req.TLS == nil {
 		req.URL.Scheme = "https"
+		req.URL.Host = req.Host
 		panic(httpRedirect{destination: req.URL.String()})
 	}
 
@@ -101,18 +102,7 @@ func (c *Controller) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate
 		return nil, nil
 	}
 
-	cert, _ := c.certMap.GetCertificate(info)
-	if cert == nil {
-		c.defaultTLSCertificateMutex.RLock()
-		c.defaultTLSCertificateMutex.RUnlock()
-		defCert := c.secs.getCert(secretKey{
-			namespace: c.svc.c.defaultTLSSecretNamespace,
-			name:      c.svc.c.defaultTLSSecretName,
-		})
-		return defCert, nil
-	}
-
-	return cert, nil
+	return c.certMap.GetCertificate(info)
 }
 
 // GetClientCertificate selects a cert from an ingress if one is available.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -344,18 +345,31 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 		return nil
 	}
 
-	klog.Infof("ingress added, %s/%s", ing.GetNamespace(), ing.GetName())
+	name := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ing.ObjectMeta.Name)
 
 	// we'll collate  alist of hosts incase the TLS list
 	// doesn't include one
 	var hosts []string
 
+	redirAnn := "ingress.kubernetes.io/ssl-redirect"
+	doRedir := u.c.defaultHTTPRedir
+	for k, v := range ing.GetAnnotations() {
+		switch k {
+		case redirAnn:
+			redir, err := strconv.ParseBool(v)
+			if err != nil {
+				klog.Errorf("invalid annotation value for %q on %v, should be true or false", redirAnn, name)
+			}
+			doRedir = redir
+			continue
+		}
+	}
 	newset := make(map[string]ingressHostGroup)
 	for i, ingr := range ing.Spec.Rules {
-		name := fmt.Sprintf("%s/%s", ing.ObjectMeta.Namespace, ing.ObjectMeta.Name)
 		ning := ingress{
 			name:      ing.ObjectMeta.Name,
 			namespace: ing.ObjectMeta.Namespace,
+			httpRedir: doRedir,
 		}
 		if ing.Spec.Backend != nil {
 			key := backendToServiceKey(ing.ObjectMeta.Namespace, ing.Spec.Backend)
@@ -460,6 +474,7 @@ func (u *ingUpdater) addItem(obj interface{}) error {
 	}
 
 	u.c.ings.update(ing.ObjectMeta.Name, ing.ObjectMeta.Namespace, newset)
+	klog.Infof("ingress %s updated", name)
 
 	return nil
 }

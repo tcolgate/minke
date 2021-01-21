@@ -42,14 +42,20 @@ type certMapEntry struct {
 // a map of host names to certificates.
 type certMap struct {
 	sync.RWMutex
-	set map[string][]*certMapEntry
+	secs     *secUpdater
+	set      map[string][]*certMapEntry
+	defaults []*certMapEntry
 }
 
 // MarshalJSON lets us report the status of the certificate mapping
 func (cm *certMap) MarshalJSON() ([]byte, error) {
 	cm.RLock()
 	defer cm.RUnlock()
-	return json.Marshal(cm.set)
+	strmap := map[string]interface{}{
+		"ingressCerts": cm.set,
+		"defaultCerts": cm.defaults,
+	}
+	return json.Marshal(strmap)
 }
 
 func (cme *certMapEntry) MarshalJSON() ([]byte, error) {
@@ -79,15 +85,15 @@ func (cm *certMap) updateIngress(key ingressKey, newset map[string][]*certMapEnt
 		cm.set = make(map[string][]*certMapEntry)
 	}
 	// filter out the old ones
-	for i := range cm.set {
+	for h := range cm.set {
 		n := 0
-		for _, cme := range cm.set[i] {
+		for _, cme := range cm.set[h] {
 			if cme.ing != key {
-				cm.set[i][n] = cme
+				cm.set[h][n] = cme
 				n++
 			}
 		}
-		cm.set[i] = cm.set[i][:n]
+		cm.set[h] = cm.set[h][:n]
 	}
 
 	for h, cmes := range newset {
@@ -110,29 +116,51 @@ func (cm *certMap) updateSecret(key secretKey, cert *tls.Certificate) {
 			}()
 		}
 	}
+
+	for _, cme := range cm.defaults {
+		func() {
+			cme.Lock()
+			defer cme.Unlock()
+			if cme.sec == key {
+				cme.cert = cert
+			}
+		}()
+	}
+}
+
+func (cm *certMap) setDefaults(keys []secretKey) {
+	var certs []*certMapEntry
+	for _, key := range keys {
+		cert := cm.secs.getCert(key)
+		certs = append(certs, &certMapEntry{
+			sec:  key,
+			cert: cert,
+		})
+	}
+
+	cm.Lock()
+	defer cm.Unlock()
+	cm.defaults = certs
 }
 
 // GetCertificate checks for non-expired acceptable matches, and then expired acceptable matches
+// and then hail-mary the first default certs, if we have any.
 func (cm *certMap) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	cm.RLock()
 	defer cm.RUnlock()
 	now := time.Now()
 
 	for _, c := range cm.set[info.ServerName] {
-		cert := func() *tls.Certificate {
-			c.RLock()
-			defer c.RUnlock()
-			err := info.SupportsCertificate(c.cert)
-			if err != nil {
-				return nil
-			}
-			if c.cert.Leaf.NotBefore.Before(now) &&
-				c.cert.Leaf.NotAfter.After(now) {
-				return c.cert
-			}
-			return nil
-		}()
-		if cert != nil {
+		c.RLock()
+		cert := c.cert
+		c.RUnlock()
+		if cert == nil {
+			continue
+		}
+
+		if cert.Leaf.NotBefore.Before(now) &&
+			cert.Leaf.NotAfter.After(now) &&
+			info.SupportsCertificate(cert) == nil {
 			return cert, nil
 		}
 	}
@@ -141,26 +169,79 @@ func (cm *certMap) GetCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, 
 	name[0] = "*"
 	wildcardName := strings.Join(name, ".")
 	for _, c := range cm.set[wildcardName] {
-		if c.cert.Leaf.NotBefore.Before(now) &&
-			c.cert.Leaf.NotAfter.After(now) &&
-			info.SupportsCertificate(c.cert) != nil {
-			return c.cert, nil
+		c.RLock()
+		cert := c.cert
+		c.RUnlock()
+		if cert == nil {
+			continue
+		}
+
+		if cert.Leaf.NotBefore.Before(now) &&
+			cert.Leaf.NotAfter.After(now) &&
+			info.SupportsCertificate(c.cert) == nil {
+			return cert, nil
+		}
+	}
+
+	for _, c := range cm.defaults {
+		c.RLock()
+		cert := c.cert
+		c.RUnlock()
+		if cert == nil {
+			continue
+		}
+
+		if cert.Leaf.NotBefore.Before(now) &&
+			cert.Leaf.NotAfter.After(now) &&
+			info.SupportsCertificate(cert) == nil {
+			return cert, nil
 		}
 	}
 
 	for _, c := range cm.set[info.ServerName] {
-		if info.SupportsCertificate(c.cert) != nil {
-			return c.cert, nil
+		c.RLock()
+		cert := c.cert
+		c.RUnlock()
+		if cert == nil {
+			continue
+		}
+
+		if info.SupportsCertificate(cert) == nil {
+			return cert, nil
 		}
 	}
 
 	for _, c := range cm.set[wildcardName] {
-		if info.SupportsCertificate(c.cert) != nil {
-			return c.cert, nil
+		c.RLock()
+		cert := c.cert
+		c.RUnlock()
+		if cert == nil {
+			continue
+		}
+
+		if info.SupportsCertificate(cert) == nil {
+			return cert, nil
 		}
 	}
 
-	return nil, nil
+	var lastOption *tls.Certificate
+	for _, c := range cm.defaults {
+		c.RLock()
+		cert := c.cert
+		c.RUnlock()
+		if cert == nil {
+			continue
+		}
+
+		if lastOption == nil {
+			lastOption = cert
+		}
+		if info.SupportsCertificate(cert) == nil {
+			return cert, nil
+		}
+	}
+
+	return lastOption, nil
 }
 
 type secUpdater struct {
@@ -303,6 +384,7 @@ func (c *Controller) setupSecretProcess(ctx context.Context) error {
 
 	c.secList = listcorev1.NewSecretLister(c.secProc.informer.GetIndexer())
 	c.secs = upd
+	c.certMap = &certMap{secs: upd}
 
 	return nil
 }

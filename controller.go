@@ -49,9 +49,7 @@ type Controller struct {
 	defaultBackendNamespace string
 	defaultBackendName      string
 
-	defaultTLSSecretNamespace  string
-	defaultTLSSecretName       string
-	defaultTLSCertificateMutex sync.RWMutex
+	defaultTLSSecrets []secretKey
 
 	clientTLSConfig           *tls.Config
 	clientTLSSecretNamespace  string
@@ -136,18 +134,19 @@ func WithDefaultBackend(str string) Option {
 	}
 }
 
-func WithDefaultTLSSecret(str string) Option {
+func WithDefaultTLSSecrets(strs ...string) Option {
 	return func(c *Controller) error {
-		if str == "" {
-			return nil
-		}
-		parts := strings.SplitN(str, "/", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("default TLS secret should be in the for of NAMESPACE/NAME")
-		}
+		for _, str := range strs {
+			if str == "" {
+				continue
+			}
+			parts := strings.SplitN(str, "/", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("default TLS secret should be in the for of NAMESPACE/NAME")
+			}
 
-		c.defaultTLSSecretNamespace = parts[0]
-		c.defaultTLSSecretName = parts[1]
+			c.defaultTLSSecrets = append(c.defaultTLSSecrets, secretKey{namespace: parts[0], name: parts[1]})
+		}
 		return nil
 	}
 }
@@ -211,19 +210,28 @@ func WithMetricsProvider(m MetricsProvider) Option {
 	}
 }
 
+// WithDefaultHTTPRedirect is an option for setting whether the
+// default behaviour should be to redirect http requests to https
+func WithDefaultHTTPRedirect(redir bool) Option {
+	return func(c *Controller) error {
+		c.defaultHTTPRedir = redir
+		return nil
+	}
+}
+
 // New creates a new one
 func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c := Controller{
-		client:          client,
-		class:           "minke",
-		namespace:       metav1.NamespaceAll,
-		selector:        labels.Everything(),
-		metrics:         metricsProvider,
-		tracer:          otel.Tracer("minke"),
-		clientTLSConfig: &tls.Config{},
-		certMap:         &certMap{},
-		ings:            &ingressSet{},
-		eps:             &epsSet{set: make(map[serviceKey][]serviceAddr)},
+		client:           client,
+		class:            "minke",
+		namespace:        metav1.NamespaceAll,
+		selector:         labels.Everything(),
+		metrics:          metricsProvider,
+		tracer:           otel.Tracer("minke"),
+		clientTLSConfig:  &tls.Config{},
+		ings:             &ingressSet{},
+		eps:              &epsSet{set: make(map[serviceKey][]serviceAddr)},
+		defaultHTTPRedir: true,
 	}
 
 	for _, opt := range opts {
@@ -244,10 +252,11 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		apiv1.EventSource{Component: "loadbalancer-controller"})
 
 	ctx := context.Background()
-	c.setupIngProcess(ctx)
-	c.setupServiceProcess(ctx)
 	c.setupSecretProcess(ctx)
+
+	c.setupServiceProcess(ctx)
 	c.setupEndpointsProcess(ctx)
+	c.setupIngProcess(ctx)
 
 	c.clientTLSConfig.GetClientCertificate = c.GetClientCertificate
 
@@ -298,10 +307,20 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 }
 
 func (c *Controller) Run(stopCh <-chan struct{}) {
-	go c.ingProc.run(stopCh)
+	// we need the secrets cache up to preload the
+	// default secrets.
 	go c.secProc.run(stopCh)
+	if !cache.WaitForCacheSync(
+		stopCh,
+		c.secProc.hasSynced) {
+	}
+	go c.secProc.runWorker()
+
+	c.certMap.setDefaults(c.defaultTLSSecrets)
+
 	go c.svcProc.run(stopCh)
 	go c.epsProc.run(stopCh)
+	go c.ingProc.run(stopCh)
 
 	if !cache.WaitForCacheSync(
 		stopCh,
@@ -314,7 +333,6 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	go c.ingProc.runWorker()
 	go c.svcProc.runWorker()
 	go c.epsProc.runWorker()
-	go c.secProc.runWorker()
 
 	<-stopCh
 }
