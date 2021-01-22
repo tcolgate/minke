@@ -14,7 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	listnetworkingv1beta1 "k8s.io/client-go/listers/networking/v1beta1"
