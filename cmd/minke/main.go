@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"log"
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,7 +59,14 @@ func main() {
 
 	klog.CopyStandardLogTo("ERROR")
 
-	stop := setupSignalHandler()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-signals
+		cancel()
+	}()
 
 	cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfig)
 	if err != nil {
@@ -139,16 +149,15 @@ func main() {
 	adminMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	adminMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
+	stop := make(chan struct{})
 	go ctrl.Run(stop)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
 		err := http.ListenAndServe(*adminAddr, adminMux)
 		if err != nil {
-			log.Printf("http listener error, %v", err)
+			klog.Errorf("http listener error, %v", err)
 		}
 		return err
 	})
@@ -162,10 +171,10 @@ func main() {
 
 	g.Go(func() error {
 		err := server.ListenAndServe()
-		if err != nil {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("http listener error, %v", err)
 		}
-		return err
+		return nil
 	})
 
 	tlsConfig := &tls.Config{
@@ -187,11 +196,16 @@ func main() {
 	g.Go(func() error {
 		tlsl, err := tls.Listen("tcp", *httpsAddr, tlsConfig)
 		if err != nil {
-			log.Fatal(err)
+			klog.Errorf("https listener error, %v", err)
+			return err
 		}
-		tlsServer.Serve(tlsl)
+		err = tlsServer.Serve(tlsl)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			klog.Errorf("https listener error, %v", err)
+			return err
+		}
 		defer tlsl.Close()
-		return err
+		return nil
 	})
 
 	http3server := http3.Server{
@@ -199,13 +213,25 @@ func main() {
 	}
 
 	g.Go(func() error {
-		return http3server.ListenAndServe()
+		err := http3server.ListenAndServe()
+		if err != nil {
+			klog.Errorf("http3 listener error, %v", err)
+			return err
+		}
+
+		return err
 	})
 
 	<-ctx.Done()
-	http3server.CloseGracefully(5 * time.Second)
+
 	server.Shutdown(context.Background())
-	if err := ctx.Err(); err != nil {
+	tlsServer.Shutdown(context.Background())
+	http3server.CloseGracefully(5 * time.Second)
+
+	close(stop)
+
+	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
+		klog.Errorf("error while stoppping, %v", err)
 		os.Exit(1)
 	}
 }
