@@ -1,4 +1,6 @@
 cert.pem
 key.pem
-./minke
+/minke
 cmd/minke/minke
+profile.out
+memprofile.out
