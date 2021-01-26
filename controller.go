@@ -230,7 +230,7 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 		tracer:           otel.Tracer("minke"),
 		clientTLSConfig:  &tls.Config{},
 		ings:             &ingressSet{},
-		eps:              &epsSet{set: make(map[serviceKey][]serviceAddr)},
+		eps:              &epsSet{},
 		defaultHTTPRedir: true,
 	}
 

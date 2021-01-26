@@ -3,7 +3,6 @@ package minke
 import (
 	"crypto/tls"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
@@ -30,8 +29,11 @@ func (c *Controller) handler(w http.ResponseWriter, req *http.Request) {
 				klog.Errorf("proxy: %v", err.logMessage)
 				w.WriteHeader(err.status)
 				return
+			default:
+				klog.Errorf("proxy error: %+v", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
 			}
-			klog.Errorf("proxy: %v", err)
 		}
 	}()
 	c.proxy.ServeHTTP(w, req)
@@ -51,20 +53,13 @@ func (c *Controller) getTarget(req *http.Request) (serviceAddr, string) {
 
 	port := c.svc.getServicePortScheme(rule.backend)
 
-	eps := c.eps.getActiveAddrs(rule.backend)
-
-	if len(eps) == 1 {
-		return eps[0], port
+	ep := c.eps.getNextAddr(rule.backend)
+	if ep.addr == "" {
+		panic(httpError{
+			status:     http.StatusBadGateway,
+			logMessage: fmt.Sprintf("no active endpoints for %v", rule.backend)})
 	}
-
-	if len(eps) > 1 {
-		// TODO: this need to do the balancing thing
-		return eps[rand.Intn(len(eps)-1)], port
-	}
-
-	panic(httpError{
-		status:     http.StatusBadGateway,
-		logMessage: fmt.Sprintf("no active endpoints for %v", rule.backend)})
+	return ep, port
 }
 
 func (c *Controller) director(req *http.Request) {

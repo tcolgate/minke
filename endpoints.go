@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1beta1 "k8s.io/api/networking/v1beta1"
@@ -33,6 +34,11 @@ func (sk serviceKey) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sk.String())
 }
 
+type serviceAddrSet struct {
+	addrs []serviceAddr
+	index uint64
+}
+
 type serviceAddr struct {
 	addr string
 	port int
@@ -50,7 +56,7 @@ func (sa serviceAddr) MarshalJSON() ([]byte, error) {
 }
 
 type epsSet struct {
-	set map[serviceKey][]serviceAddr
+	set map[serviceKey]*serviceAddrSet
 	sync.RWMutex
 }
 
@@ -61,7 +67,7 @@ func (eps *epsSet) MarshalJSON() ([]byte, error) {
 	strmap := map[string][]string{}
 	for k, vs := range eps.set {
 		kstr := k.String()
-		for _, v := range vs {
+		for _, v := range vs.addrs {
 			strmap[kstr] = append(strmap[kstr], v.String())
 		}
 	}
@@ -86,10 +92,23 @@ type epsUpdater struct {
 	c *Controller
 }
 
+func (eps *epsSet) getNextAddr(key serviceKey) serviceAddr {
+	eps.RLock()
+	set := eps.set[key]
+	eps.RUnlock()
+	if set == nil {
+		return serviceAddr{}
+	}
+	count := atomic.AddUint64(&set.index, 1)
+	addr := set.addrs[count%uint64(len(set.addrs))]
+	return addr
+}
+
 func (eps *epsSet) getActiveAddrs(key serviceKey) []serviceAddr {
 	eps.RLock()
 	defer eps.RUnlock()
-	return eps.set[key]
+
+	return eps.set[key].addrs
 }
 
 func (u *epsUpdater) addItem(obj interface{}) error {
@@ -103,13 +122,16 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 		name:      eps.Name,
 	}
 
-	addrs := make(map[serviceKey][]serviceAddr)
+	addrsset := make(map[serviceKey]*serviceAddrSet)
 
 	for i := range eps.Subsets {
 		set := eps.Subsets[i]
 
 		for j := range set.Addresses {
-			addrs[portlessKey] = append(addrs[portlessKey], serviceAddr{
+			if addrsset[portlessKey] == nil {
+				addrsset[portlessKey] = &serviceAddrSet{}
+			}
+			addrsset[portlessKey].addrs = append(addrsset[portlessKey].addrs, serviceAddr{
 				addr: set.Addresses[j].IP,
 			})
 		}
@@ -124,7 +146,10 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 			port := set.Ports[j].Port
 
 			for j := range set.Addresses {
-				addrs[key] = append(addrs[key], serviceAddr{
+				if addrsset[key] == nil {
+					addrsset[key] = &serviceAddrSet{}
+				}
+				addrsset[key].addrs = append(addrsset[key].addrs, serviceAddr{
 					addr: set.Addresses[j].IP,
 					port: int(port),
 				})
@@ -133,7 +158,11 @@ func (u *epsUpdater) addItem(obj interface{}) error {
 	}
 
 	u.c.eps.Lock()
-	for k, v := range addrs {
+	if u.c.eps.set == nil {
+		u.c.eps.set = make(map[serviceKey]*serviceAddrSet)
+	}
+
+	for k, v := range addrsset {
 		u.c.eps.set[k] = v
 	}
 	u.c.eps.Unlock()

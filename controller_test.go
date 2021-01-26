@@ -33,6 +33,7 @@ func TestTest(t *testing.T) {
 	defer ts.Close()
 
 	u, _ := url.Parse(ts.URL)
+	t.Logf("test URL: %s", u)
 	cp, _ := strconv.Atoi(u.Port())
 	clientset := fake.NewSimpleClientset(
 		&networkingv1beta1.Ingress{
@@ -43,7 +44,8 @@ func TestTest(t *testing.T) {
 				Name:      "first",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"kubernetes.io/ingress.class": "minke",
+					"kubernetes.io/ingress.class":        "minke",
+					"ingress.kubernetes.io/ssl-redirect": "false",
 				},
 			},
 			Spec: networkingv1beta1.IngressSpec{
@@ -144,7 +146,8 @@ func BenchmarkMinke(b *testing.B) {
 				Name:      "first",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"kubernetes.io/ingress.class": "minke",
+					"kubernetes.io/ingress.class":        "minke",
+					"ingress.kubernetes.io/ssl-redirect": "false",
 				},
 			},
 			Spec: networkingv1beta1.IngressSpec{
@@ -313,7 +316,8 @@ func TestWebsocket(t *testing.T) {
 				Name:      "first",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"kubernetes.io/ingress.class": "minke",
+					"kubernetes.io/ingress.class":        "minke",
+					"ingress.kubernetes.io/ssl-redirect": "false",
 				},
 			},
 			Spec: networkingv1beta1.IngressSpec{
@@ -424,13 +428,13 @@ func TestHTTP2Backend(t *testing.T) {
 	h2s := &http2.Server{}
 
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Logf("req: %+v", r)
 		fmt.Fprintln(w, "OK")
 	})
 
 	ts := httptest.NewServer(h2c.NewHandler(h, h2s))
 	defer ts.Close()
 
-	http2.ConfigureServer(ts.Config, &http2.Server{})
 	strhttp2 := "HTTP2"
 
 	u, _ := url.Parse(ts.URL)
@@ -444,7 +448,8 @@ func TestHTTP2Backend(t *testing.T) {
 				Name:      "first",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"kubernetes.io/ingress.class": "minke",
+					"kubernetes.io/ingress.class":        "minke",
+					"ingress.kubernetes.io/ssl-redirect": "false",
 				},
 			},
 			Spec: networkingv1beta1.IngressSpec{
@@ -530,11 +535,11 @@ func TestHTTP2Backend(t *testing.T) {
 		t.Fatalf("got error %v", err)
 	}
 	defer resp.Body.Close()
-	t.Logf("http2 http resp: %v", resp)
+	t.Logf("http2 http resp: %#v", resp)
 
 	bs, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		t.Logf("http2 http read resp: %v", err)
+		t.Logf("http2 http read resp: %#v", err)
 	}
 
 	t.Logf("http2 http resp body: %s", bs)
