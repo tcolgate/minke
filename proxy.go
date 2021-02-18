@@ -1,7 +1,9 @@
 package minke
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,12 +21,23 @@ type httpRedirect struct {
 	destination string
 }
 
+func (c *Controller) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, context.Canceled) {
+		klog.Infof("client cancelled: %#v", err)
+		return
+	}
+
+	klog.Infof("proxy backend error: %#v", err)
+	w.WriteHeader(http.StatusBadGateway)
+}
+
 func (c *Controller) handler(w http.ResponseWriter, req *http.Request) {
 	defer func() {
 		if err := recover(); err != nil {
 			switch err := err.(type) {
 			case httpRedirect:
 				http.Redirect(w, req, err.destination, http.StatusMovedPermanently)
+				return
 			case httpError:
 				klog.Errorf("proxy: %v", err.logMessage)
 				w.WriteHeader(err.status)
@@ -36,6 +49,10 @@ func (c *Controller) handler(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}()
+
+	if c.setquicheaders != nil {
+		c.setquicheaders(w.Header())
+	}
 	c.proxy.ServeHTTP(w, req)
 }
 

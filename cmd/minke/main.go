@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -94,6 +95,8 @@ func main() {
 		panic(err.Error())
 	}
 
+	tlsMinVersion := uint16(tls.VersionTLS12)
+
 	ciphers := []uint16{
 		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
@@ -101,17 +104,11 @@ func main() {
 		tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,   // Go 1.8 only
 		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-
-		// Best disabled, as they don't provide Forward Secrecy,
-		// but might be necessary for some clients
-		// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-		// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 	}
 	curves := []tls.CurveID{
 		tls.CurveP256,
 		tls.X25519, // Go 1.8 only
 	}
-	tlsMinVersion := uint16(tls.VersionTLS12)
 
 	tlsClientConfig := &tls.Config{
 		PreferServerCipherSuites: true,
@@ -120,10 +117,31 @@ func main() {
 		CipherSuites:             ciphers,
 	}
 
+	transport1 := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			DualStack: true,
+		}).DialContext,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 10 * time.Second,
+		TLSClientConfig:       tlsClientConfig,
+	}
+
 	var defaultSecrets []string
 	for _, str := range strings.Split(*serverTLSDefaultSecrets, ",") {
 		defaultSecrets = append(defaultSecrets, strings.TrimSpace(str))
 	}
+
+	// we don't actually run this server. http3.SetQUICHeaders wants
+	// and instance of a server to discern the port from.
+	setquicheaders := (&http3.Server{
+		Server: &http.Server{
+			Addr: *httpsAddr,
+		},
+	}).SetQuicHeaders
 
 	ctrl, err := minke.New(
 		clientset,
@@ -132,8 +150,9 @@ func main() {
 		minke.WithSelector(selector),
 		minke.WithDefaultHTTPRedirect(*httpRedir),
 		minke.WithDefaultTLSSecrets(defaultSecrets...),
-		minke.WithClientTLSConfig(tlsClientConfig),
+		minke.WithClientHTTPTransport(transport1),
 		minke.WithClientTLSSecret(*clientTLSSecret),
+		minke.WithSetQuicHeaders(setquicheaders),
 	)
 	if err != nil {
 		log.Fatalf("error creating controller, err = %v", err)

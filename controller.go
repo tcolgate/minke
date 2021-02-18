@@ -36,13 +36,14 @@ import (
 
 // Controller is the main thing
 type Controller struct {
-	client        kubernetes.Interface
-	namespace     string
-	class         string
-	selector      labels.Selector
-	refresh       time.Duration
-	logFunc       func(string, ...interface{})
-	accessLogFunc func(string, ...interface{})
+	client         kubernetes.Interface
+	namespace      string
+	class          string
+	selector       labels.Selector
+	refresh        time.Duration
+	logFunc        func(string, ...interface{})
+	accessLogFunc  func(string, ...interface{})
+	setquicheaders func(http.Header) error
 
 	defaultHTTPRedir bool
 
@@ -51,7 +52,8 @@ type Controller struct {
 
 	defaultTLSSecrets []secretKey
 
-	clientTLSConfig           *tls.Config
+	clientTransport           *http.Transport
+	clientHTTP2Transport      *http2.Transport
 	clientTLSSecretNamespace  string
 	clientTLSSecretName       string
 	clientTLSCertificate      *tls.Certificate
@@ -167,12 +169,16 @@ func WithClientTLSSecret(str string) Option {
 	}
 }
 
-func WithClientTLSConfig(cfg *tls.Config) Option {
+func WithClientHTTPTransport(t *http.Transport) Option {
 	return func(c *Controller) error {
-		if cfg == nil {
-			return nil
-		}
-		c.clientTLSConfig = cfg.Clone()
+		c.clientTransport = t
+		return nil
+	}
+}
+
+func WithClientHTTP2Transport(t *http2.Transport) Option {
+	return func(c *Controller) error {
+		c.clientHTTP2Transport = t
 		return nil
 	}
 }
@@ -219,16 +225,46 @@ func WithDefaultHTTPRedirect(redir bool) Option {
 	}
 }
 
+// WithSetQuicHeaders is an option for setting a function
+// the is used to set the Quic altSvc header
+func WithSetQuicHeaders(f func(http.Header) error) Option {
+	return func(c *Controller) error {
+		c.setquicheaders = f
+		return nil
+	}
+}
+
 // New creates a new one
 func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
+	transport1 := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			DualStack: true,
+		}).DialContext,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 10 * time.Second,
+	}
+
+	transport2 := &http2.Transport{
+		AllowHTTP: true,
+		DialTLS: func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
+			return net.Dial(netw, addr)
+		},
+	}
+
 	c := Controller{
-		client:           client,
-		class:            "minke",
-		namespace:        metav1.NamespaceAll,
-		selector:         labels.Everything(),
-		metrics:          metricsProvider,
-		tracer:           otel.Tracer("minke"),
-		clientTLSConfig:  &tls.Config{},
+		client:               client,
+		class:                "minke",
+		namespace:            metav1.NamespaceAll,
+		selector:             labels.Everything(),
+		metrics:              metricsProvider,
+		tracer:               otel.Tracer("minke"),
+		clientTransport:      transport1,
+		clientHTTP2Transport: transport2,
+
 		ings:             &ingressSet{},
 		eps:              &epsSet{},
 		defaultHTTPRedir: true,
@@ -258,45 +294,40 @@ func New(client kubernetes.Interface, opts ...Option) (*Controller, error) {
 	c.setupEndpointsProcess(ctx)
 	c.setupIngProcess(ctx)
 
-	c.clientTLSConfig.GetClientCertificate = c.GetClientCertificate
-
-	transport1 := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-			DualStack: true,
-		}).DialContext,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ExpectContinueTimeout: 10 * time.Second,
-		TLSClientConfig:       c.clientTLSConfig,
+	if c.clientTransport.TLSClientConfig == nil {
+		c.clientTransport.TLSClientConfig = &tls.Config{}
 	}
 
-	transport2 := &http2.Transport{
-		AllowHTTP: true,
-		DialTLS: func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
-			return net.Dial(netw, addr)
-		},
+	if c.clientTransport.TLSClientConfig.GetCertificate != nil {
+	}
+
+	c.clientTransport.TLSClientConfig.GetClientCertificate = c.GetClientCertificate
+
+	c.clientHTTP2Transport.AllowHTTP = true
+	c.clientHTTP2Transport.DialTLS = func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
+		return net.Dial(netw, addr)
 	}
 
 	c.transport = &httpTransport{
-		base:  transport1,
-		http2: transport2,
+		base:  c.clientTransport,
+		http2: c.clientHTTP2Transport,
+	}
+
+	if c.metrics != nil {
+		c.transport = c.metrics.NewHTTPTransportMetrics(c.transport)
 	}
 
 	c.proxy = &httputil.ReverseProxy{
 		Director:      c.director,
 		FlushInterval: 10 * time.Millisecond,
-		Transport:     c.transport,
 		ErrorHandler:  c.errorHandler,
+		Transport:     c.transport,
 	}
 
 	c.Handler = http.HandlerFunc(c.handler)
 
 	if c.metrics != nil {
 		c.Handler = c.metrics.NewHTTPServerMetrics(c.Handler)
-		c.transport = c.metrics.NewHTTPTransportMetrics(c.transport)
 	}
 
 	if c.tracer != nil {
@@ -386,9 +417,4 @@ func (c *Controller) ServeStatusHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	io.Copy(w, bytes.NewBuffer(bs))
-}
-
-func (c *Controller) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	klog.Infof("proxy: %#v", err)
-	w.WriteHeader(http.StatusBadGateway)
 }
