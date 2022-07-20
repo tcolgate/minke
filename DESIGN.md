@@ -2,6 +2,8 @@
 
 Principles:
 
+- Support modern clients ands servers (http2,http3)
+- Full featured TLS support.
 - All certs are taken from cluster secrets, this make live update easy without the
   need for filesystem watching.
 - Merge kubernetes Ingress
@@ -17,10 +19,10 @@ Principles:
   - If something can be achieved by running multiple controllers,
     e.g. http vs https handling, blocking, http redirect, we will not provide
     magic to do it for you.
-  - Rely on http.ReverseProxy with two exceptions.
+  - Rely on http.ReverseProxy with possible exceptions.
     - Support h2c to unencrypted http2 backends.
 - Maximize observability.
-  - Out of the box OpenTracing support (at least jaeger, probably zipkin).
+  - Out of the box OpenTelemetry support (at least jaeger, probably zipkin).
   - Out of the box prometheus metrics.
   - Enable debug endpoints on the administrative endpoint.
 
